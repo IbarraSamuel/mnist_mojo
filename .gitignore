@@ -1,0 +1,12 @@
+
+# pixi environments
+.pixi
+*.egg-info
+# magic environments
+.magic
+
+# python
+.venv
+
+# Train files
+digit-recognizer/
