@@ -3,7 +3,7 @@ import os
 
 from memory import Span
 from algorithm import sync_parallelize
-from layout import Layout, LayoutTensor
+from layout import Layout, LayoutTensor, composition
 from gpu.host import DeviceContext, DeviceBuffer
 from gpu import thread_idx, block_idx, barrier
 from algorithm import sync_parallelize
@@ -43,10 +43,6 @@ fn print_grayscale[
 fn print_grayscale[W: Writer, //](owned intensity: Float32, mut w: W):
     gray_code = 232 + Int(intensity.cast[DType.float32]() * 23.0 / 255.0)
     w.write("\033[48;5;", gray_code, "m")
-    # alias charset_size = len(charset)
-    # pct = intensity.cast[DType.float32]() / 255.0
-    # index = (pct * (charset_size - 1)).cast[DType.uint8]()
-    # w.write(charset[index])
 
 
 struct TrainImage(Writable):
@@ -96,14 +92,7 @@ struct TrainImage(Writable):
         return self.data[i]
 
 
-fn main() raises:
-    var data_folder = Path("digit-recognizer")
-    # test = data_folder / "test.csv"
-    train = data_folder / "train.csv"
-
-    # test_data = test.read_bytes()
-    train_data_string = train.read_text()
-    # Other way to find "\n" in a text?
+fn arange_data(train_data_string: String) raises -> List[TrainImage]:
     jumps = List[Int]()
     n = 0
     while n < len(train_data_string):
@@ -121,9 +110,11 @@ fn main() raises:
     frst = TrainImage(data=train_bytes, init=jumps[0], end=jumps[1])
     images = List[TrainImage]()
 
+    # Fill with something
     for _ in range(file_rows):
         images.append(frst)
 
+    # Then, fill it with multiple threads
     @parameter
     fn calc_each(i: Int) raises:
         img = TrainImage(
@@ -135,53 +126,86 @@ fn main() raises:
 
     sync_parallelize[calc_each](len(jumps) - 2)
 
+    return images
+
+
+fn dot[
+    Mrows: Int,
+    Mcols: Int,
+    Ncols: Int,
+    dtype: DType,
+](
+    M: LayoutTensor[dtype, Layout.row_major(Mrows, Mcols), MutableAnyOrigin],
+    X: LayoutTensor[dtype, Layout.row_major(Mcols, Ncols), MutableAnyOrigin],
+    B: LayoutTensor[dtype, Layout.row_major(Mrows, 1), MutableAnyOrigin],
+    O: LayoutTensor[dtype, Layout.row_major(Mrows, Ncols), MutableAnyOrigin],
+):
+    # We will try to do w1
+    i = thread_idx.x  # should be w1.shape[1]
+    j = thread_idx.y  # should be w1.shape[0]
+    k = thread_idx.z  # should be b1.shape[0]
+    O[i, k] += M[i, j] * X[j, k] + B[i, 1]
+
+
+fn main() raises:
+    alias dtype = DType.float32
+    var data_folder = Path("digit-recognizer")
+    test = data_folder / "test.csv"
+    train = data_folder / "train.csv"
+
+    _test_data = test.read_text()
+    train_data_string = train.read_text()
+
+    images = arange_data(train_data_string)
+
     # Create a device context to use a gpu.
-    with DeviceContext() as ctx:
-        alias dtype = DType.float32
+    ctx = DeviceContext()
+    xt = enqueue_build_tensor_from[file_rows, img_pixels](ctx, images)
+    w1 = enqueue_build_random_tensor[10, img_pixels](ctx)
+    b1 = enqueue_build_random_tensor[10, 1](ctx)
+    w2 = enqueue_build_random_tensor[10, 10](ctx)
+    b2 = enqueue_build_random_tensor[10, 1](ctx)
+    o = enqueue_build_random_tensor[img_pixels, img_pixels](ctx)
 
-        # Initialize
-        train_x = enqueue_build_tensor_from[file_rows, img_pixels](ctx, images)
-        w1 = enqueue_build_random_tensor[10, img_pixels](ctx)
-        b1 = enqueue_build_random_tensor[10, 1](ctx)
-        w2 = enqueue_build_random_tensor[10, 10](ctx)
-        b2 = enqueue_build_random_tensor[10, 1](ctx)
+    x = enqueue_build_random_tensor[img_pixels, file_rows](ctx)
+    ctx.synchronize()
 
-        ctx.synchronize()
+    fn transpose[
+        a: Int, b: Int
+    ](
+        t: LayoutTensor[dtype, Layout.row_major(a, b), MutableAnyOrigin],
+        o: LayoutTensor[dtype, Layout.row_major(b, a), MutableAnyOrigin],
+    ):
+        pass
+        o[block_idx.y, block_idx.x] = t[block_idx.x, block_idx.y]
 
-        fn forward_prop(
-            w1: __type_of(w1),
-            b1: __type_of(b1),
-            w2: __type_of(w2),
-            b2: __type_of(b2),
-            x: __type_of(train_x),
-            out_tensor: __type_of(w1),
-        ):
-            pass
+    ctx.enqueue_function[transpose[file_rows, img_pixels]](
+        xt, x, grid_dim=(file_rows, img_pixels), block_dim=1
+    )
+    # transpose[file_rows, img_pixels](xt, x)
 
-        # # z = w1 * x + b1
-        # # out_tensor.store[10 * 784](0, 0, z.load[10*784](0, 0))
+    ctx.synchronize()
 
-        fn relu(z: __type_of(w1)):
-            pass
-
-        ctx.enqueue_function[forward_prop](
-            w1, b1, w2, b2, train_x, grid_dim=1, block_dim=1
-        )
-        ctx.enqueue_function[relu](train_x, grid_dim=1, block_dim=1)
-        ctx.synchronize()
-    # local = ctx.enqueue_create_host_buffer[dtype](img_pixels * file_rows)
-    # t = LayoutTensor[dtype, train_x.layout](local)
-    # t.copy_from(train_x)
-
-    # ctx.synchronize()
-    # print(t)
-
-    # fn sum_tensor(t: LayoutTensor[dtype, train_x.layout]):
-    #     val = t.load[img_pixels](block_idx.x, 0).reduce_add()
-    #     print(val)
-
-    # ctx.enqueue_function[sum_tensor](t, grid_dim=file_rows, block_dim=1)
-    # ctx.synchronize()
+    fn dot[
+        Mrows: Int,
+        Mcols: Int,
+        Ncols: Int,
+        dtype: DType,
+    ](
+        M: LayoutTensor[
+            dtype, Layout.row_major(Mrows, Mcols), MutableAnyOrigin
+        ],
+        X: LayoutTensor[dtype, Layout.row_major(Mrows, 1), MutableAnyOrigin],
+        B: LayoutTensor[dtype, Layout.row_major(Mrows, 1), MutableAnyOrigin],
+        O: LayoutTensor[
+            dtype, Layout.row_major(Mrows, Ncols), MutableAnyOrigin
+        ],
+    ):
+        # We will try to do w1
+        i = thread_idx.x  # should be w1.shape[1]
+        j = thread_idx.y  # should be w1.shape[0]
+        k = thread_idx.z  # should be b1.shape[0]
+        O[i, k] += M[i, j] * X[j, k] + B[i, 1]
 
 
 fn enqueue_build_tensor_from[

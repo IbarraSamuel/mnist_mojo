@@ -10,3 +10,4 @@ train = "mojo src/train.mojo"
 
 [dependencies]
 max = "*"
+numpy = ">=1.26.4,<2"
