@@ -110,7 +110,7 @@ fn enqueue_images_to_gpu_matrix[
         )
         abort(msg)
 
-    print("Passing values...")
+    # print("Passing values...")
 
     # @parameter
     # fn load_data(i: Int) raises:
@@ -121,9 +121,9 @@ fn enqueue_images_to_gpu_matrix[
 
     # sync_parallelize[load_data](len(images))
 
-    valid = True
-    control_total = 0
-    test_total = 0
+    # valid = True
+    # control_total = 0
+    # test_total = 0
 
     alias pixels: Int = tensor.shape[0]()
     alias images_: Int = tensor.shape[1]()
@@ -131,31 +131,31 @@ fn enqueue_images_to_gpu_matrix[
         for image in range(images_):
             control = Int(images[image].get_data()[pixel])
             local_tensor[pixel, image] = control
-            test = Int(local_tensor[pixel, image])
-            control_total += control
-            test_total += test
+            # test = Int(local_tensor[pixel, image])
+            # control_total += control
+            # test_total += test
 
-    print("Control:", control_total)
-    print("Test:", test_total)
+    # print("Control:", control_total)
+    # print("Test:", test_total)
 
-    for pixel in range(pixels):
-        for image in range(images_):
-            control = Int(images[image].get_data()[pixel])
-            test = Int(local_buff[pixel * images_ + image])
-            if control != test:
-                print("Not valid for image", image, "and pixel", pixel)
-                valid = False
-                break
-        if not valid:
-            break
-            # total += Int(local_buff[i * j + j])
-            # total2 += Int(images[j].get_data()[i])
+    # for pixel in range(pixels):
+    #     for image in range(images_):
+    #         control = Int(images[image].get_data()[pixel])
+    #         test = Int(local_buff[pixel * images_ + image])
+    #         if control != test:
+    #             print("Not valid for image", image, "and pixel", pixel)
+    #             valid = False
+    #             break
+    #     if not valid:
+    #         break
+    # total += Int(local_buff[i * j + j])
+    # total2 += Int(images[j].get_data()[i])
 
     # buff.enqueue_copy_from(local_buff)
     # tensor.copy_from(local_tensor)
-    print(":valid:", valid)
+    # print(":valid:", valid)
     buff.enqueue_copy_from(local_buff)
-    ctx.synchronize()
+    # ctx.synchronize()
 
 
 # tensor.copy_from(local_tensor)

@@ -41,7 +41,6 @@ fn main() raises:
     b2b, b2 = enqueue_build_matrix[10, 1, dtype=dtype](gpu)
 
     print("load train to gpu")
-    gpu.synchronize()
     xb, x = enqueue_build_matrix[img_rows * img_cols, train_size, dtype=dtype](
         gpu
     )
