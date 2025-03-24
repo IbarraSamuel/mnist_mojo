@@ -1,4 +1,4 @@
-from gpu.host import DeviceContext, DeviceBuffer
+from gpu.host import DeviceContext, DeviceBuffer, HostBuffer
 from layout import Layout, LayoutTensor
 from layout.math import sum
 from data_traits import HasData
@@ -24,14 +24,14 @@ fn enqueue_create_buf[
 
 fn enqueue_create_host_buf[
     dtype: DType = DType.float32
-](ctx: DeviceContext, size: Int) raises -> DeviceBuffer[dtype]:
+](ctx: DeviceContext, size: Int) raises -> HostBuffer[dtype]:
     buf = ctx.enqueue_create_host_buffer[dtype](size)
     return buf.enqueue_fill(0)
 
 
 fn enqueue_host_to_gpu[
     dtype: DType
-](ctx: DeviceContext, host_buff: DeviceBuffer[dtype]) raises -> DeviceBuffer[
+](ctx: DeviceContext, host_buff: HostBuffer[dtype]) raises -> DeviceBuffer[
     dtype
 ]:
     gpu_buff = ctx.enqueue_create_buffer[dtype](len(host_buff))
@@ -41,10 +41,10 @@ fn enqueue_host_to_gpu[
 
 fn enqueue_gpu_to_host[
     dtype: DType
-](ctx: DeviceContext, gpu_buff: DeviceBuffer[dtype]) raises -> DeviceBuffer[
+](ctx: DeviceContext, gpu_buff: DeviceBuffer[dtype]) raises -> HostBuffer[
     dtype
 ]:
-    host_buff = ctx.enqueue_create_buffer[dtype](len(gpu_buff))
+    host_buff = ctx.enqueue_create_host_buffer[dtype](len(gpu_buff))
     gpu_buff.enqueue_copy_to(host_buff)
     return host_buff
 
@@ -57,12 +57,11 @@ fn enqueue_buf_to_tensor[
     return LayoutTensor[dtype, layout](b)
 
 
-fn enqueue_randomize(ctx: DeviceContext, device_buffer: DeviceBuffer) raises:
-    hostbuff = ctx.enqueue_create_host_buffer[device_buffer.type](
-        len(device_buffer)
-    )
-    random.rand(hostbuff.unsafe_ptr(), len(hostbuff))
-    device_buffer.enqueue_copy_from(hostbuff)
+fn enqueue_randomize(ctx: DeviceContext, gpu_buffer: DeviceBuffer) raises:
+    size = len(gpu_buffer)
+    host_buffer = ctx.enqueue_create_host_buffer[gpu_buffer.type](size)
+    random.rand(host_buffer.unsafe_ptr(), size)
+    gpu_buffer.enqueue_copy_from(host_buffer)
 
 
 fn enqueue_build_matrix[
@@ -110,75 +109,13 @@ fn enqueue_images_to_gpu_matrix[
         )
         abort(msg)
 
-    # print("Passing values...")
-
-    # @parameter
-    # fn load_data(i: Int) raises:
-    #     data = images[i].get_data()
-
-    #     for j in range(img_type.size):
-    #         local_tensor.store(j, i, data[j])
-
-    # sync_parallelize[load_data](len(images))
-
-    # valid = True
-    # control_total = 0
-    # test_total = 0
-
+    # TODO: Optimize
     alias pixels: Int = tensor.shape[0]()
     alias images_: Int = tensor.shape[1]()
     for pixel in range(pixels):
         for image in range(images_):
             control = Int(images[image].get_data()[pixel])
             local_tensor[pixel, image] = control
-            # test = Int(local_tensor[pixel, image])
-            # control_total += control
-            # test_total += test
-
-    # print("Control:", control_total)
-    # print("Test:", test_total)
-
-    # for pixel in range(pixels):
-    #     for image in range(images_):
-    #         control = Int(images[image].get_data()[pixel])
-    #         test = Int(local_buff[pixel * images_ + image])
-    #         if control != test:
-    #             print("Not valid for image", image, "and pixel", pixel)
-    #             valid = False
-    #             break
-    #     if not valid:
-    #         break
-    # total += Int(local_buff[i * j + j])
-    # total2 += Int(images[j].get_data()[i])
-
-    # buff.enqueue_copy_from(local_buff)
-    # tensor.copy_from(local_tensor)
-    # print(":valid:", valid)
-    buff.enqueue_copy_from(local_buff)
-    # ctx.synchronize()
-
-
-# tensor.copy_from(local_tensor)
-
-
-# fn enqueue_build_tensor_from[
-#     l: Int, z: Int, img: TrainImage
-# ](ctx: DeviceContext, images: List[img]) raises -> LayoutTensor[
-#     DType.float32, Layout.row_major(l, z), MutableAnyOrigin
-# ]:
-#     alias dtype = DType.float32
-#     buf = enqueue_create_buf[dtype](ctx, l, z)
-#     local_buf = ctx.enqueue_create_host_buffer[dtype](l * z)
-
-#     @parameter
-#     fn load_images(i: Int) raises:
-#         sub_buf = local_buf.create_sub_buffer[dtype](img_pixels * i, img_pixels)
-#         ctx.enqueue_copy[dtype](dst_buf=sub_buf, src_ptr=images[i].data.data)
-
-#     sync_parallelize[load_images](len(images))
-
-#     buf.enqueue_copy_from(local_buf)
-#     return LayoutTensor[DType.float32, Layout.row_major(l, z)](buf)
 
 
 # fn dot[
