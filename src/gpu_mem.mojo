@@ -9,6 +9,16 @@ from algorithm import sync_parallelize
 from memory import UnsafePointer, memcpy
 import random
 from image import print_grayscale
+from math import sqrt
+
+alias MAX_BLOCKS_1D = 1024
+"""The dim multiplication should be less or equal than 1024."""
+
+alias MAX_BLOCKS_2D = sqrt(MAX_BLOCKS_1D)
+"""The max for 2D blocks."""
+
+alias MAX_BLOCKS_3D = MAX_BLOCKS_1D ** (1 / 3)
+"""The max for 3D blocks."""
 
 
 fn get_gpu() raises -> DeviceContext:
@@ -99,56 +109,17 @@ fn enqueue_images_to_gpu_matrix[
     local_buff = local_buff.enqueue_fill(0)
     local_tensor = __type_of(tensor)(local_buff)
 
-    values_len = 0
-    values_len = len(images) * img_type.size
-
-    if values_len > len(buff):
-        msg = (
-            "The size of the data: {} is greater than the size of the"
-            " buffer: {}".format(values_len, len(buff))
-        )
-        abort(msg)
-
-    # TODO: Optimize
     alias pixels: Int = tensor.shape[0]()
     alias images_: Int = tensor.shape[1]()
+
+    if len(images) != images_:
+        abort("Img len didn't matck")
+    if img_type.size != pixels:
+        abort("Img pixels didn't matck")
+
     for pixel in range(pixels):
         for image in range(images_):
             control = Int(images[image].get_data()[pixel])
             local_tensor[pixel, image] = control
 
-
-# fn dot[
-#     Mrows: Int,
-#     Mcols: Int,
-#     Ncols: Int,
-#     dtype: DType,
-# ](
-#     M: LayoutTensor[dtype, Layout.row_major(Mrows, Mcols), MutableAnyOrigin],
-#     X: LayoutTensor[dtype, Layout.row_major(Mrows, 1), MutableAnyOrigin],
-#     B: LayoutTensor[dtype, Layout.row_major(Mrows, 1), MutableAnyOrigin],
-#     O: LayoutTensor[dtype, Layout.row_major(Mrows, Ncols), MutableAnyOrigin],
-# ):
-#     # We will try to do w1
-#     i = thread_idx.x  # should be w1.shape[1]
-#     j = thread_idx.y  # should be w1.shape[0]
-#     k = thread_idx.z  # should be b1.shape[0]
-#     O[i, k] += M[i, j] * X[j, k] + B[i, 1]
-
-
-# fn dot[
-#     Mrows: Int,
-#     Mcols: Int,
-#     Ncols: Int,
-#     dtype: DType,
-# ](
-#     M: LayoutTensor[dtype, Layout.row_major(Mrows, Mcols), MutableAnyOrigin],
-#     X: LayoutTensor[dtype, Layout.row_major(Mcols, Ncols), MutableAnyOrigin],
-#     B: LayoutTensor[dtype, Layout.row_major(Mrows, 1), MutableAnyOrigin],
-#     O: LayoutTensor[dtype, Layout.row_major(Mrows, Ncols), MutableAnyOrigin],
-# ):
-#     # We will try to do w1
-#     i = thread_idx.x  # should be w1.shape[1]
-#     j = thread_idx.y  # should be w1.shape[0]
-#     k = thread_idx.z  # should be b1.shape[0]
-#     O[i, k] += M[i, j] * X[j, k] + B[i, 1]
+    buff.enqueue_copy_from(local_buff)
