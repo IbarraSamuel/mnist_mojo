@@ -3,7 +3,13 @@ from layout import Layout, LayoutTensor, composition, IntTuple
 from gpu.id import thread_idx, block_idx
 
 
-from gpu_mem import enqueue_create_matrix, enqueue_create_host_buf
+from gpu_mem import (
+    enqueue_create_matrix,
+    enqueue_create_host_buf,
+    MAX_BLOCKS_1D,
+    MAX_BLOCKS_2D,
+    MAX_BLOCKS_3D,
+)
 
 from math import e
 
@@ -24,6 +30,23 @@ fn print_matrix[
         print(host_buffer[i], end="")
         if i % cols == 0:
             print()
+
+
+# fn _test_limits(ctx: DeviceContext) raises:
+#     fn print_shape():
+#         print(
+#             "Blocks: [",
+#             block_idx.x,
+#             block_idx.y,
+#             block_idx.z,
+#             "], Threads: [",
+#             thread_idx.x,
+#             thread_idx.y,
+#             thread_idx.z,
+#             "]",
+#         )
+
+#     ctx.enqueue_function[print_shape](grid_dim=(100, 100, 100), block_dim=1)
 
 
 # fn print_matrix_gpu[
@@ -55,6 +78,7 @@ fn dot_add[
     DeviceBuffer[dtype],
     LayoutTensor[dtype, Layout.row_major(x, z), MutableAnyOrigin],
 ):
+    # Assume that t1.cols is the largest
     tob, to = enqueue_create_matrix[rows=x, cols=z, dtype=dtype](ctx)
 
     fn dot_add_gpu(
@@ -63,7 +87,7 @@ fn dot_add[
         t3: __type_of(t3),
         to: __type_of(t3),
     ):
-        t1x, t1y, t2y = thread_idx.x, thread_idx.y, thread_idx.z
+        t1x, t1y, t2y = thread_idx.x, block_idx.x, thread_idx.y
         constrained[
             t1.shape[1]() == t2.shape[0](),
             "Dims does not match between t1 and t2.",
@@ -75,15 +99,10 @@ fn dot_add[
         to[t1x, t2y] = t1[t1x, t1y] * t2[t1y, t2y] + t3[t1x, t2y]
 
     ctx.enqueue_function[dot_add_gpu](
-        t1, t2, t3, to, grid_dim=1, block_dim=(x, y, z)
+        t1, t2, t3, to, grid_dim=y, block_dim=(x, z)
     )
 
     return tob, to
-
-
-fn relu_gpu(ti: LayoutTensor, to: __type_of(ti)):
-    xi, yi = block_idx.x, block_idx.y
-    to[xi, yi] = max(ti[xi, yi], 0)
 
 
 fn relu[
@@ -96,21 +115,13 @@ fn relu[
     # alias cols = ti.shape[1]()
     tob, to = enqueue_create_matrix[rows=x, cols=y, dtype = ti.dtype](ctx)
 
-    ctx.enqueue_function[relu_gpu](ti, to, grid_dim=1, block_dim=(x, y))
+    fn relu_gpu(ti: __type_of(ti), to: __type_of(to)):
+        xi, yi = block_idx.x, thread_idx.x
+        to[xi, yi] = max(ti[xi, yi], 0)
+
+    ctx.enqueue_function[relu_gpu](ti, to, grid_dim=x, block_dim=y)
 
     return tob, to
-
-
-fn softmax_gpu(ti: LayoutTensor, to: __type_of(ti)):
-    alias ti_x = ti.shape[0]()
-    alias ti_y = ti.shape[1]()
-
-    xi, yi = block_idx.x, block_idx.y
-    tot = ti.load[ti_x * ti_y](0, 0).reduce_add()
-
-    to[xi, yi] = ti[xi, yi] - tot
-    to[xi, yi] = e ** to[xi, yi]
-    to[xi, yi] = to[xi, yi]
 
 
 fn softmax[
@@ -123,7 +134,18 @@ fn softmax[
     # alias cols = ti.shape[1]()
     tob, to = enqueue_create_matrix[rows=x, cols=y, dtype = ti.dtype](ctx)
 
-    ctx.enqueue_function[softmax_gpu](ti, to, grid_dim=x, block_dim=(x, y))
+    fn softmax_gpu(ti: __type_of(ti), to: __type_of(to)):
+        alias ti_x = ti.shape[0]()
+        alias ti_y = ti.shape[1]()
+
+        xi, yi = block_idx.x, thread_idx.x
+        tot = ti.load[ti_x * ti_y](0, 0).reduce_add()
+
+        to[xi, yi] = ti[xi, yi] - tot
+        to[xi, yi] = e ** to[xi, yi]
+        to[xi, yi] = to[xi, yi]
+
+    ctx.enqueue_function[softmax_gpu](ti, to, grid_dim=x, block_dim=y)
 
     return tob, to
 
@@ -139,8 +161,8 @@ fn forward_propagation[
     x: LayoutTensor[dtype, Layout.row_major(xr, xc)],
 ) raises -> (__type_of(b1), __type_of(b1), __type_of(b2), __type_of(b2)):
     # create an out tensor to hold the result.
-    _, z1 = dot_add(ctx, w1, x, b1)
-    _, a1 = relu(ctx, z1)
-    _, z2 = dot_add(ctx, w2, a1, b2)
-    _, a2 = softmax(ctx, z2)
+    z1b, z1 = dot_add(ctx, w1, x, b1)
+    a1b, a1 = relu(ctx, z1)
+    z2b, z2 = dot_add(ctx, w2, a1, b2)
+    a2b, a2 = softmax(ctx, z2)
     return z1, a1, z2, a2

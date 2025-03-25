@@ -5,7 +5,11 @@ from gpu_mem import (
     enqueue_create_matrix,
     enqueue_images_to_gpu_matrix,
 )
-from gpu_ops import print_matrix
+from gpu_ops import forward_propagation
+from bit import next_power_of_two
+from gpu.id import block_idx
+
+# from gpu_ops import print_matrix, _test_limits
 
 alias img_rows = 28
 alias img_cols = 28
@@ -50,4 +54,21 @@ fn main() raises:
     enqueue_images_to_gpu_matrix(gpu, xb, x, images)
     gpu.synchronize()
 
-    print_matrix(gpu, b2b, b2)
+    # fn print_image(x: __type_of(x)):
+    #     alias px = next_power_of_two(img_pixels)
+    #     alias chars = " .,:-=+*#%@"
+    #     alias charset_size = len(chars)
+    #     tot = Float32()
+    #     for i in range(img_pixels):
+    #         v = x[i, block_idx.x + 4].reduce_add()
+    #         idx = (v / 255.0) * (charset_size - 1)
+    #         print(chars[idx.cast[DType.uint8]()], end="")
+    #         if i % 28 == 0:
+    #             print()
+    #     if tot > 0.0:
+    #         print(tot)
+
+    # gpu.enqueue_function[print_image](x, grid_dim=1, block_dim=1)
+    # forward_propagation(gpu, w1, b1, w2, b2, x)
+
+    gpu.synchronize()
