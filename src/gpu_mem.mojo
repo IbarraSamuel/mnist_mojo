@@ -16,14 +16,14 @@ fn get_gpu() raises -> DeviceContext:
 
 
 fn enqueue_create_buf[
-    dtype: DType = DType.float32
+    dtype: DType
 ](ctx: DeviceContext, size: Int) raises -> DeviceBuffer[dtype]:
     buf = ctx.enqueue_create_buffer[dtype](size)
     return buf.enqueue_fill(0)
 
 
 fn enqueue_create_host_buf[
-    dtype: DType = DType.float32
+    dtype: DType
 ](ctx: DeviceContext, size: Int) raises -> HostBuffer[dtype]:
     buf = ctx.enqueue_create_host_buffer[dtype](size)
     return buf.enqueue_fill(0)
@@ -60,16 +60,16 @@ fn enqueue_buf_to_tensor[
 fn enqueue_randomize(ctx: DeviceContext, gpu_buffer: DeviceBuffer) raises:
     size = len(gpu_buffer)
     host_buffer = ctx.enqueue_create_host_buffer[gpu_buffer.type](size)
-    random.rand(host_buffer.unsafe_ptr(), size)
+    random.rand(host_buffer.unsafe_ptr(), size, min=-0.1, max=0.1)
     gpu_buffer.enqueue_copy_from(host_buffer)
 
 
-fn enqueue_build_matrix[
+fn enqueue_create_matrix[
     rows: Int,
     cols: Int,
     *,
+    dtype: DType,
     randomize: Bool = False,
-    dtype: DType = DType.float32,
     layout: Layout = Layout.row_major(rows, cols),
 ](ctx: DeviceContext) raises -> (
     DeviceBuffer[dtype],
