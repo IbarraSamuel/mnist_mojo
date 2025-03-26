@@ -69,6 +69,18 @@ fn main() raises:
     #         print(tot)
 
     # gpu.enqueue_function[print_image](x, grid_dim=1, block_dim=1)
-    # forward_propagation(gpu, w1, b1, w2, b2, x)
+
+    alias iterations = 500
+    # z1, a1, z2, a2 = forward_propagation(gpu, w1, b1, w2, b2, x)
+    z1 = forward_propagation(gpu, w1, b1, w2, b2, x)
+    # for i in range(iterations):
+    #     z1, a1, z2, a2 = forward_propagation(gpu, w1, b1, w2, b2, x)
+    # Backward propagation
+    # update parameters
+
+    # if i % 10 == 0:
+    #     print("Iteration:", i)
+    # preditions = get_predictions(a2)
+    # print("Accuracy:", get_accuracy(predictions, y))
 
     gpu.synchronize()
