@@ -5,7 +5,7 @@ from gpu_mem import (
     enqueue_create_matrix,
     enqueue_images_to_gpu_matrix,
 )
-from gpu_ops import forward_propagation
+from gpu_ops import forward_propagation, print_matrix
 from bit import next_power_of_two
 from gpu.id import block_idx
 
@@ -71,8 +71,11 @@ fn main() raises:
     # gpu.enqueue_function[print_image](x, grid_dim=1, block_dim=1)
 
     alias iterations = 500
-    # z1, a1, z2, a2 = forward_propagation(gpu, w1, b1, w2, b2, x)
-    z1 = forward_propagation(gpu, w1, b1, w2, b2, x)
+    (z1b, z1), (a1b, a1), (z2b, z2), (a2b, a2) = forward_propagation(
+        gpu, w1, b1, w2, b2, x
+    )
+
+    # print_matrix[28, 28](gpu, z1b, z1)
     # for i in range(iterations):
     #     z1, a1, z2, a2 = forward_propagation(gpu, w1, b1, w2, b2, x)
     # Backward propagation

@@ -1,5 +1,5 @@
 from gpu.host import DeviceContext, DeviceBuffer
-from gpu import barrier
+from gpu import warp
 from layout import Layout, LayoutTensor, composition, IntTuple
 from gpu.id import thread_idx, block_idx
 from bit import next_power_of_two
@@ -26,10 +26,12 @@ fn print_matrix[
     buff.enqueue_copy_to(host_buffer)
     ctx.synchronize()
 
+    print("[", end="")
     for i in range(rows * cols):
-        print(host_buffer[i], end="")
+        print(host_buffer[i], end=",")
         if i % cols == 0:
-            print()
+            print("]", end="\n[")
+    print("]")
 
 
 # fn _test_limits(ctx: DeviceContext) raises:
@@ -100,34 +102,34 @@ fn dot[
     return tob, to
 
 
-fn add[
-    x: Int, y: Int, dtype: DType
-](
-    ctx: DeviceContext,
-    t1: LayoutTensor[dtype, Layout.row_major(x, y)],
-    t2: LayoutTensor[dtype, Layout.row_major(x, y)],
-) raises -> (
-    DeviceBuffer[dtype],
-    LayoutTensor[dtype, Layout.row_major(x, y), MutableAnyOrigin],
-):
-    # Assume that t1.cols is the largest
-    tob, to = enqueue_create_matrix[rows=x, cols=y, dtype=dtype](ctx)
+# fn add[
+#     x: Int, y: Int, dtype: DType
+# ](
+#     ctx: DeviceContext,
+#     t1: LayoutTensor[dtype, Layout.row_major(x, y)],
+#     t2: LayoutTensor[dtype, Layout.row_major(x, y)],
+# ) raises -> (
+#     DeviceBuffer[dtype],
+#     LayoutTensor[dtype, Layout.row_major(x, y), MutableAnyOrigin],
+# ):
+#     # Assume that t1.cols is the largest
+#     tob, to = enqueue_create_matrix[rows=x, cols=y, dtype=dtype](ctx)
 
-    fn add_gpu(
-        t1: __type_of(t1),
-        t2: __type_of(t2),
-        to: __type_of(to),
-    ):
-        t1x, t1y = thread_idx.x, block_idx.x
-        constrained[
-            t1.shape[0]() == t2.shape[0]() and t1.shape[1]() == t2.shape[1](),
-            "Dims does not match between t1 and t2.",
-        ]()
-        to[t1x, t1y] = t1[t1x, t1y] * t2[t1x, t1y]
+#     fn add_gpu(
+#         t1: __type_of(t1),
+#         t2: __type_of(t2),
+#         to: __type_of(to),
+#     ):
+#         t1x, t1y = thread_idx.x, block_idx.x
+#         constrained[
+#             t1.shape[0]() == t2.shape[0]() and t1.shape[1]() == t2.shape[1](),
+#             "Dims does not match between t1 and t2.",
+#         ]()
+#         to[t1x, t1y] = t1[t1x, t1y] * t2[t1x, t1y]
 
-    ctx.enqueue_function[add_gpu](t1, t2, to, grid_dim=y, block_dim=x)
+#     ctx.enqueue_function[add_gpu](t1, t2, to, grid_dim=y, block_dim=x)
 
-    return tob, to
+#     return tob, to
 
 
 fn add[
@@ -160,19 +162,19 @@ fn add[
     return tob, to
 
 
-fn dot_add[
-    x: Int, y: Int, z: Int, dtype: DType
-](
-    ctx: DeviceContext,
-    t1: LayoutTensor[dtype, Layout.row_major(x, y)],
-    t2: LayoutTensor[dtype, Layout.row_major(y, z)],
-    t3: LayoutTensor[dtype, Layout.row_major(x, z)],
-) raises -> (
-    DeviceBuffer[dtype],
-    LayoutTensor[dtype, Layout.row_major(x, z), MutableAnyOrigin],
-):
-    _db, dt = dot(ctx, t1, t2)
-    return add(ctx, dt, t3)
+# fn dot_add[
+#     x: Int, y: Int, z: Int, dtype: DType
+# ](
+#     ctx: DeviceContext,
+#     t1: LayoutTensor[dtype, Layout.row_major(x, y)],
+#     t2: LayoutTensor[dtype, Layout.row_major(y, z)],
+#     t3: LayoutTensor[dtype, Layout.row_major(x, z)],
+# ) raises -> (
+#     DeviceBuffer[dtype],
+#     LayoutTensor[dtype, Layout.row_major(x, z), MutableAnyOrigin],
+# ):
+#     _db, dt = dot(ctx, t1, t2)
+#     return add(ctx, dt, t3)
 
 
 fn dot_add[
@@ -207,111 +209,98 @@ fn relu[
     return tob, to
 
 
-fn _sum[
+fn sum_zero_axis[
     rows: Int, cols: Int, dtype: DType
 ](
     ctx: DeviceContext,
     ti: LayoutTensor[dtype, Layout.row_major(rows, cols), MutableAnyOrigin],
-) raises -> Scalar[dtype]:
+) raises -> (
+    DeviceBuffer[dtype],
+    LayoutTensor[dtype, Layout.row_major(cols), MutableAnyOrigin],
+):
     alias simd_chunks = 2**13
-    alias load_size = next_power_of_two(rows)
 
-    _out_buff, out_matrix = enqueue_create_matrix[1, cols, dtype=dtype](ctx)
+    out_buff, out_matrix = enqueue_create_matrix[cols, dtype=dtype](ctx)
 
-    fn _sum_gpu(
-        ti: __type_of(ti), out: __type_of(out_matrix), mut sum: Scalar[dtype]
+    fn sum_zero_axis_gpu(
+        tensor: __type_of(ti),
+        out: __type_of(out_matrix),
     ):
-        tr = block_idx.x  # These are cols in the original tensor
-        col_values = ti.load[load_size](tr, 0).shift_left[load_size - rows]()
-        out[0, tr] = col_values.reduce_add()
+        r, c = thread_idx.x, block_idx.x
+        value = tensor.load[1](r, c)
+        value = warp.sum(value)
 
-        # barrier()
+        if thread_idx.x == 0:
+            out[c] = value
 
-        # if block_idx.x == 0:
-        #     iterations = 1 + cols // simd_chunks
-
-        #     for i in range(iterations):
-        #         rem = cols - simd_chunks * (i + 1)
-        #         print("Last reduce at idx", i, "with rem", rem)
-
-        #         accum = out.load[simd_chunks](0, simd_chunks * i)
-
-        #         if rem < 0:
-        #             sum += accum.shift_left[
-        #                 simd_chunks - (cols % simd_chunks)
-        #             ]().reduce_add()
-        #             break
-
-        #         sum += accum.reduce_add()
-
-    sum = Scalar[dtype]()
-    ctx.enqueue_function[_sum_gpu](
-        ti.transpose(), out_matrix, sum, grid_dim=cols, block_dim=1
+    ctx.enqueue_function[sum_zero_axis_gpu](
+        ti, out_matrix, grid_dim=cols, block_dim=1
     )
-    ctx.synchronize()
 
-    return sum
-    # total = Scalar[dtype]()
-    # alias sum_times = 1 + cols // simd_chunks
-
-    # @parameter
-    # for i in range(sum_times):  # change it to be aware of 2^15 limitation
-    #     alias rem = cols - simd_chunks * (i + 1)
-
-    #     accum = host_tensor.load[simd_chunks](1, simd_chunks * i)
-
-    #     @parameter
-    #     if rem < 0:
-    #         total += accum.shift_left[abs(rem)]().reduce_add()
-    #         break
-
-    #     total += accum.reduce_add()
-
-    # return total
+    return out_buff, out_matrix
 
 
 fn softmax[
-    x: Int, y: Int, dtype: DType
+    rows: Int, cols: Int, dtype: DType
 ](
     ctx: DeviceContext,
-    ti: LayoutTensor[dtype, Layout.row_major(x, y), MutableAnyOrigin],
+    tib: DeviceBuffer[dtype],
+    ti: LayoutTensor[dtype, Layout.row_major(rows, cols), MutableAnyOrigin],
 ) raises -> (DeviceBuffer[dtype], __type_of(ti)):
-    # alias rows = ti.shape[0]()
-    # alias cols = ti.shape[1]()
-    tob, to = enqueue_create_matrix[rows=x, cols=y, dtype = ti.dtype](ctx)
+    tob, to = enqueue_create_matrix[rows=rows, cols=cols, dtype = ti.dtype](ctx)
 
-    fn softmax_gpu(
-        ti: __type_of(ti), tensor_sum: Scalar[dtype], to: __type_of(to)
-    ):
-        xi, yi = block_idx.x, thread_idx.x
+    # CALC THE MAX VALUE IN ALL THE BUFFER
+    max_v = Scalar[dtype]()
 
-        to[xi, yi] = e ** (to[xi, yi] - tensor_sum)
-        to[xi, yi] = to[xi, yi]
+    host = ctx.enqueue_create_host_buffer[dtype](rows * cols)
+    tib.enqueue_copy_to(host)
+    t = LayoutTensor[dtype, Layout.row_major(rows, cols)](host)
 
-    tensor_sum = _sum(ctx, ti)
-    # ctx.enqueue_function[softmax_gpu](
-    #     ti, tensor_sum, to, grid_dim=x, block_dim=y
-    # )
+    ctx.synchronize()
+
+    # TODO: Improve Performance
+    for r in range(rows):
+        for c in range(cols):
+            max_v = max(t[r, c].reduce_max(), max_v)
+
+    print(max_v)
+
+    # Do the exponential calculation
+    fn _exp(ti: __type_of(to), max: Scalar[dtype], to: __type_of(to)):
+        c, r = block_idx.x, thread_idx.x
+        to[r, c] = e ** (ti[r, c] - max)
+
+    ctx.enqueue_function[_exp](ti, max_v, to, grid_dim=cols, block_dim=rows)
+
+    # Calculate the sum for each column. # TODO: Test it, since it's using load.
+    _max_buff, sum_t = sum_zero_axis(ctx, to)
+
+    # Divide the exp by the sum
+    fn _div(to: __type_of(to), sum_t: __type_of(sum_t)):
+        r, c = thread_idx.x, block_idx.x
+        to[r, c] /= sum_t[c]
+
+    ctx.enqueue_function[_div](to, sum_t, grid_dim=cols, block_dim=rows)
 
     return tob, to
 
 
-fn forward_propagation[
-    xr: Int, xc: Int, w1r: Int, w2r: Int, dtype: DType
-](
-    ctx: DeviceContext,
-    w1: LayoutTensor[dtype, Layout.row_major(w1r, xr), MutableAnyOrigin],
-    b1: LayoutTensor[dtype, Layout.row_major(w1r, xc), MutableAnyOrigin],
-    w2: LayoutTensor[dtype, Layout.row_major(w2r, w1r), MutableAnyOrigin],
-    b2: LayoutTensor[dtype, Layout.row_major(w2r, xc), MutableAnyOrigin],
-    x: LayoutTensor[dtype, Layout.row_major(xr, xc)],
-) raises -> (__type_of(b1), __type_of(b1), __type_of(b2), __type_of(b2)):
-    # create an out tensor to hold the result.
-    _z1b, z1 = dot_add(ctx, w1, x, b1)
-    _a1b, a1 = relu(ctx, z1)
-    _z2b, z2 = dot_add(ctx, w2, a1, b2)
-    _a2b, a2 = softmax(ctx, z2)
-    return z1, a1, z2, a2
+# fn forward_propagation[
+#     xr: Int, xc: Int, w1r: Int, w2r: Int, dtype: DType
+# ](
+#     ctx: DeviceContext,
+#     w1: LayoutTensor[dtype, Layout.row_major(w1r, xr), MutableAnyOrigin],
+#     b1: LayoutTensor[dtype, Layout.row_major(w1r, xc), MutableAnyOrigin],
+#     w2: LayoutTensor[dtype, Layout.row_major(w2r, w1r), MutableAnyOrigin],
+#     b2: LayoutTensor[dtype, Layout.row_major(w2r, xc), MutableAnyOrigin],
+#     x: LayoutTensor[dtype, Layout.row_major(xr, xc)],
+# ) raises -> (__type_of(b1), __type_of(b1), __type_of(b2), __type_of(b2)):
+#     # create an out tensor to hold the result.
+#     _z1b, z1 = dot_add(ctx, w1, x, b1)
+#     _a1b, a1 = relu(ctx, z1)
+#     _z2b, z2 = dot_add(ctx, w2, a1, b2)
+#     _a2b, a2 = softmax(ctx, z2)
+#     return z1, a1, z2, a2
 
 
 fn forward_propagation[
@@ -324,14 +313,26 @@ fn forward_propagation[
     b2: LayoutTensor[dtype, Layout.row_major(w2r, 1), MutableAnyOrigin],
     x: LayoutTensor[dtype, Layout.row_major(xr, xc)],
 ) raises -> (
-    LayoutTensor[dtype, Layout.row_major(w1r, xc), MutableAnyOrigin],
-    LayoutTensor[dtype, Layout.row_major(w1r, xc), MutableAnyOrigin],
-    LayoutTensor[dtype, Layout.row_major(w2r, xc), MutableAnyOrigin],
-    LayoutTensor[dtype, Layout.row_major(w2r, xc), MutableAnyOrigin],
+    (
+        DeviceBuffer[dtype],
+        LayoutTensor[dtype, Layout.row_major(w1r, xc), MutableAnyOrigin],
+    ),
+    (
+        DeviceBuffer[dtype],
+        LayoutTensor[dtype, Layout.row_major(w1r, xc), MutableAnyOrigin],
+    ),
+    (
+        DeviceBuffer[dtype],
+        LayoutTensor[dtype, Layout.row_major(w2r, xc), MutableAnyOrigin],
+    ),
+    (
+        DeviceBuffer[dtype],
+        LayoutTensor[dtype, Layout.row_major(w2r, xc), MutableAnyOrigin],
+    ),
 ):
     # create an out tensor to hold the result.
-    _z1b, z1 = dot_add(ctx, w1, x, b1)
-    _a1b, a1 = relu(ctx, z1)
-    _z2b, z2 = dot_add(ctx, w2, a1, b2)
-    _a2b, a2 = softmax(ctx, z2)
-    return z1, a1, z2, a2
+    z1b, z1 = dot_add(ctx, w1, x, b1)
+    a1b, a1 = relu(ctx, z1)
+    z2b, z2 = dot_add(ctx, w2, a1, b2)
+    a2b, a2 = softmax(ctx, z2b, z2)
+    return (z1b, z1), (a1b, a1), (z2b, z2), (a2b, a2)

@@ -22,6 +22,7 @@ alias MAX_BLOCKS_3D = MAX_BLOCKS_1D ** (1 / 3)
 
 
 fn get_gpu() raises -> DeviceContext:
+    random.seed(0)
     return DeviceContext()
 
 
@@ -72,6 +73,25 @@ fn enqueue_randomize(ctx: DeviceContext, gpu_buffer: DeviceBuffer) raises:
     host_buffer = ctx.enqueue_create_host_buffer[gpu_buffer.type](size)
     random.rand(host_buffer.unsafe_ptr(), size, min=-0.1, max=0.1)
     gpu_buffer.enqueue_copy_from(host_buffer)
+
+
+fn enqueue_create_matrix[
+    size: Int,
+    *,
+    dtype: DType,
+    randomize: Bool = False,
+    layout: Layout = Layout.row_major(size),
+](ctx: DeviceContext) raises -> (
+    DeviceBuffer[dtype],
+    LayoutTensor[dtype, layout, MutableAnyOrigin],
+):
+    var b = enqueue_create_buf[dtype](ctx, size)
+
+    @parameter
+    if randomize:
+        enqueue_randomize(ctx, b)
+
+    return b, enqueue_buf_to_tensor[layout](ctx, b)
 
 
 fn enqueue_create_matrix[
