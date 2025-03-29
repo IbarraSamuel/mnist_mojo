@@ -61,6 +61,9 @@ fn main() raises:
             for i in range(cols):
                 print(out_tensor[i], end=", ")
             print("]")
+
+            print("It's ok?:", out_tensor[0] == 528)
+            print("Warp working but short?:", out_tensor[0] == (528 - 32))
         #     print("===== OUTPUT =====")
         #     print(out_tensor)
         #     print("==================")
