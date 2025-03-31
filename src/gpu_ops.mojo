@@ -1,8 +1,11 @@
 from gpu.host import DeviceContext, DeviceBuffer
-from gpu import warp
+from gpu import warp, barrier, thread_idx, block_idx
+from gpu.memory import AddressSpace
+
 from layout import Layout, LayoutTensor, composition, IntTuple
-from gpu.id import thread_idx, block_idx
 from bit import next_power_of_two
+from memory import stack_allocation
+
 from gpu_mem import (
     enqueue_create_matrix,
     enqueue_create_host_buf,
@@ -85,17 +88,31 @@ fn dot[
     # z is the cols for the train data, and the largest -> 42000
     tob, to = enqueue_create_matrix[rows=x, cols=z, dtype=dtype](ctx)
 
+    alias warps = y // 32 + (1 if y % 32 > 0 else 0)
+
     fn dot_gpu(
         t1: __type_of(t1),
         t2: __type_of(t2),
         to: __type_of(to),
     ):
+        shared = stack_allocation[
+            warps, dtype, address_space = AddressSpace.SHARED
+        ]()
+
         t1x, t1y, t2y = block_idx.x, thread_idx.x, block_idx.y
         constrained[
             t1.shape[1]() == t2.shape[0](),
             "Dims does not match between t1 and t2.",
         ]()
-        to[t1x, t2y] = t1[t1x, t1y] * t2[t1y, t2y]
+        mulval = t1[t1x, t1y] * t2[t1y, t2y]
+        shared[t1y // 32] = warp.sum(mulval)[0]
+
+        barrier()
+
+        if t1y == 0:
+            to[t1x, t2y] = shared.load[
+                width = next_power_of_two(warps)
+            ]().reduce_add()
 
     ctx.enqueue_function[dot_gpu](t1, t2, to, grid_dim=(x, z), block_dim=y)
 
@@ -155,7 +172,7 @@ fn add[
             t1.shape[0]() == t2.shape[0](),
             "Dims does not match between t1 and t2.",
         ]()
-        to[t1x, t1y] = t1[t1x, t1y] * t2[t1x, 1]
+        to[t1x, t1y] = t1[t1x, t1y] * t2[t1x, 0]
 
     ctx.enqueue_function[add_gpu](t1, t2, to, grid_dim=y, block_dim=x)
 
@@ -219,6 +236,7 @@ fn sum_zero_axis[
     LayoutTensor[dtype, Layout.row_major(cols), MutableAnyOrigin],
 ):
     alias simd_chunks = 2**13
+    alias warps = rows // 32 + (1 if rows % 32 > 0 else 0)
 
     out_buff, out_matrix = enqueue_create_matrix[cols, dtype=dtype](ctx)
 
@@ -226,12 +244,21 @@ fn sum_zero_axis[
         tensor: __type_of(ti),
         out: __type_of(out_matrix),
     ):
+        shared = stack_allocation[
+            warps, Scalar[dtype], address_space = AddressSpace.SHARED
+        ]()
+
         r, c = thread_idx.x, block_idx.x
-        value = tensor.load[1](r, c)
-        value = warp.sum(value)
+        th_value = tensor.load[1](r, c)
+        value = warp.sum(th_value)
+        shared[r // 32] = value
+
+        barrier()
 
         if thread_idx.x == 0:
-            out[c] = value
+            out[c] = shared.load[
+                width = next_power_of_two(warps)
+            ]().reduce_add()
 
     ctx.enqueue_function[sum_zero_axis_gpu](
         ti, out_matrix, grid_dim=cols, block_dim=1

@@ -4,7 +4,7 @@ from gpu import warp
 from gpu.memory import AddressSpace
 from memory import stack_allocation
 from layout import LayoutTensor, Layout
-from math import iota
+from math import iota, ceil
 
 from bit import next_power_of_two
 
@@ -34,39 +34,32 @@ fn main() raises:
     out_buff = out_buff.enqueue_fill(0)
     out_tensor = LayoutTensor[dtype, Layout(cols)](out_buff)
 
+    alias warps = rows // 32 + (1 if rows % 32 > 0 else 0)
+
     fn sum_zero_axis(
         tensor: LayoutTensor[dtype, layout, MutableAnyOrigin],
         out_tensor: __type_of(out_tensor),
     ):
-        alias warps = cols // 32 + (cols if cols % 32 > 0 else 0)
+        # Store each warp in consecutive spaces
         shared = stack_allocation[
-            cols * warps,
+            warps,
             Scalar[dtype],
             address_space = AddressSpace.SHARED,
         ]()
+
         r, c = thread_idx.x, block_idx.x
-        value = tensor.load[1](r, c)
-        value = warp.sum(value)
+        tvalue = tensor.load[1](r, c)
 
-        if block_idx.x == 0:
-            print("thread:", thread_idx.x, "value:", value)
-
-        if thread_idx.x == 0:
-            out_tensor[c] = value
+        value = warp.sum(tvalue)
+        warp_idx = r // 32
+        shared[warp_idx] = value
 
         barrier()
 
-        if c == 0 and r == 0:
-            print("[", end="")
-            for i in range(cols):
-                print(out_tensor[i], end=", ")
-            print("]")
-
-            print("It's ok?:", out_tensor[0] == 528)
-            print("Warp working but short?:", out_tensor[0] == (528 - 32))
-        #     print("===== OUTPUT =====")
-        #     print(out_tensor)
-        #     print("==================")
+        if thread_idx.x == 0:
+            out_tensor[c] = shared.load[
+                width = next_power_of_two(warps)
+            ]().reduce_add()
 
     ctx.enqueue_function[sum_zero_axis](
         device_tensor, out_tensor, grid_dim=cols, block_dim=rows
