@@ -289,25 +289,78 @@ fn softmax[
         for c in range(cols):
             max_v = max(t[r, c].reduce_max(), max_v)
 
+    print("Expected:", max_v)
     # reduce_1 = t.reshape[Layout.row_major(1024, warps)]()
 
-    fn all_max(t: __type_of(ti)):
-        shared = stack_allocation[
-            cols // 32 + 1, dtype, address_space = AddressSpace.SHARED
-        ]()
+    # Trying to improve perf.
+    # 1. Reshape the tensor, to have the closest value to 1024 in it's rows
+    #  This can be done:
 
-        r, c = thread_idx.x, block_idx.x
-        tvalue = t.load[1](r, c)
-        shared[r // 32] = warp.max(tvalue)
+    elems = cols * rows
 
-        barrier()
+    new_rows = 1024
+    while elems % new_rows != 0:
+        new_rows -= 1
 
-        if thread_idx.x == 0:
-            max = shared.load[width = cols // 32 + 1]().reduce_max()
-            print(max, end=" ")
+    # new_cols = elems // new_rows
+    # out = ctx.enqueue_create_buffer[dtype](rows * cols)
+    # out_t = LayoutTensor[dtype, Layout.row_major(cols * rows)](out)
+    # out.enqueue_copy_from(tib)
 
-    ctx.enqueue_function[all_max](ti, grid_dim=cols, block_dim=rows)
-    print(max_v)
+    # fn all_max(
+    #     rd: Int,
+    #     cd: Int,
+    #     t: __type_of(out_t),
+    # ):
+    #     if thread_idx.x == 0 and block_idx.x == 0:
+    #         print(
+    #             "shared size:",
+    #             (rd // 32) + (1 if rd % 32 > 0 else 0),
+    #         )
+    #         print("shape:", rd, cd)
+
+    #     shared = stack_allocation[
+    #         32, dtype, address_space = AddressSpace.SHARED
+    #     ]()
+
+    #     r, c = thread_idx.x, block_idx.x
+    #     tvalue = t[r * cd + c][0]
+    #     shared[r // 32] = warp.max(tvalue)
+
+    #     barrier()
+
+    #     if thread_idx.x == 0:
+    #         # print("Warp Value:", shared.load[width=32]())
+    #         max = shared.load[width=32]().reduce_max()
+    #         t[c] = max
+
+    # ctx.enqueue_function[all_max](
+    #     new_rows,
+    #     new_cols,
+    #     out,
+    #     grid_dim=new_cols,
+    #     block_dim=new_rows,
+    # )
+
+    # while new_cols != 1:
+    #     elems, new_rows = new_cols, 1024
+    #     while elems % new_rows != 0:
+    #         new_rows -= 1
+    #     new_cols = elems // new_rows
+    #     print(elems, new_rows, new_cols)
+
+    #     ctx.enqueue_function[all_max](
+    #         new_rows,
+    #         new_cols,
+    #         out,
+    #         out,
+    #         grid_dim=new_cols,
+    #         block_dim=new_rows,
+    #     )
+
+    # final = ctx.enqueue_create_host_buffer[dtype](1)
+    # final.enqueue_copy_from(out.create_sub_buffer[dtype](0, 1))
+    # print("Got:", final)
 
     # Do the exponential calculation
     fn _exp(ti: __type_of(to), max: Scalar[dtype], to: __type_of(to)):
