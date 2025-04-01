@@ -4,6 +4,7 @@ from gpu.memory import AddressSpace
 
 from layout import Layout, LayoutTensor, composition, IntTuple
 from bit import next_power_of_two
+from math import ceil
 from memory import stack_allocation
 
 from gpu_mem import (
@@ -235,9 +236,7 @@ fn sum_zero_axis[
     DeviceBuffer[dtype],
     LayoutTensor[dtype, Layout.row_major(cols), MutableAnyOrigin],
 ):
-    alias simd_chunks = 2**13
     alias warps = rows // 32 + (1 if rows % 32 > 0 else 0)
-
     out_buff, out_matrix = enqueue_create_matrix[cols, dtype=dtype](ctx)
 
     fn sum_zero_axis_gpu(
@@ -290,6 +289,24 @@ fn softmax[
         for c in range(cols):
             max_v = max(t[r, c].reduce_max(), max_v)
 
+    # reduce_1 = t.reshape[Layout.row_major(1024, warps)]()
+
+    fn all_max(t: __type_of(ti)):
+        shared = stack_allocation[
+            cols // 32 + 1, dtype, address_space = AddressSpace.SHARED
+        ]()
+
+        r, c = thread_idx.x, block_idx.x
+        tvalue = t.load[1](r, c)
+        shared[r // 32] = warp.max(tvalue)
+
+        barrier()
+
+        if thread_idx.x == 0:
+            max = shared.load[width = cols // 32 + 1]().reduce_max()
+            print(max, end=" ")
+
+    ctx.enqueue_function[all_max](ti, grid_dim=cols, block_dim=rows)
     print(max_v)
 
     # Do the exponential calculation
