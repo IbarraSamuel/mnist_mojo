@@ -38,6 +38,69 @@ fn print_matrix[
     print("]")
 
 
+fn matrix_max[
+    dtype: DType, rows: Int, cols: Int, //
+](
+    ctx: DeviceContext,
+    ti: LayoutTensor[dtype, Layout.row_major(rows, cols)],
+) raises -> LayoutTensor[dtype, Layout.row_major(1), MutableAnyOrigin]:
+    out = ctx.enqueue_create_buffer[dtype](1)
+    out_t = LayoutTensor[dtype, Layout.row_major(1)](out)
+
+    fn all_max(
+        rd: Int,
+        cd: Int,
+        t: __type_of(ti),
+        final: __type_of(out_t),
+    ):
+        shared = stack_allocation[
+            32, dtype, address_space = AddressSpace.SHARED
+        ]()
+
+        r, c = thread_idx.x, block_idx.x
+        idx = r * cd + c
+        # Calculate row and col based on index.
+        rr, rc = idx // cols, idx % cols
+
+        tvalue = t[rr, rc][0]
+        value = warp.max(tvalue)
+        shared[r // 32] = value
+
+        barrier()
+
+        if thread_idx.x == 0:
+            max = shared.load[width=32]().reduce_max()
+            lr, lc = c // cols, c % cols
+            t[lr, lc] = max
+
+        if thread_idx.x == 0 and block_idx.x == 0 and cd == 1:
+            final[0] = t[0, 0][0]
+
+    new_cols = cols
+    new_rows = rows
+
+    # While we have more than 1 columns, let's do row reduction, and
+    while new_cols != 1:
+        elems, new_rows = new_cols * new_rows, 1024
+        while elems % new_rows != 0:
+            new_rows -= 1
+        new_cols = elems // new_rows
+
+        ctx.enqueue_function[all_max](
+            new_rows,
+            new_cols,
+            ti,
+            out_t,
+            grid_dim=new_cols,
+            block_dim=new_rows,
+        )
+
+        new_rows = 1
+
+    # ctx.synchronize()
+    return out_t
+
+
 # fn _test_limits(ctx: DeviceContext) raises:
 #     fn print_shape():
 #         print(
@@ -83,10 +146,6 @@ fn dot[
     DeviceBuffer[dtype],
     LayoutTensor[dtype, Layout.row_major(x, z), MutableAnyOrigin],
 ):
-    # Assume that t1.cols is the largest
-    # x is the rows for the weights -> 10
-    # y is the rows for the train data -> 784
-    # z is the cols for the train data, and the largest -> 42000
     tob, to = enqueue_create_matrix[rows=x, cols=z, dtype=dtype](ctx)
 
     alias warps = y // 32 + (1 if y % 32 > 0 else 0)
@@ -101,10 +160,7 @@ fn dot[
         ]()
 
         t1x, t1y, t2y = block_idx.x, thread_idx.x, block_idx.y
-        constrained[
-            t1.shape[1]() == t2.shape[0](),
-            "Dims does not match between t1 and t2.",
-        ]()
+
         mulval = t1[t1x, t1y] * t2[t1y, t2y]
         shared[t1y // 32] = warp.sum(mulval)[0]
 
@@ -118,6 +174,46 @@ fn dot[
     ctx.enqueue_function[dot_gpu](t1, t2, to, grid_dim=(x, z), block_dim=y)
 
     return tob, to
+
+
+# fn dot[
+#     x: Int, y: Int, z: Int, dtype: DType
+# ](
+#     ctx: DeviceContext,
+#     t1: LayoutTensor[dtype, Layout.row_major(x, y)],
+#     t2: LayoutTensor[dtype, Layout.row_major(y, z)],
+# ) raises -> (
+#     DeviceBuffer[dtype],
+#     LayoutTensor[dtype, Layout.row_major(x, z), MutableAnyOrigin],
+# ):
+#     tob, to = enqueue_create_matrix[rows=x, cols=z, dtype=dtype](ctx)
+
+#     alias warps = y // 32 + (1 if y % 32 > 0 else 0)
+
+#     fn dot_gpu(
+#         t1: __type_of(t1),
+#         t2: __type_of(t2),
+#         to: __type_of(to),
+#     ):
+#         shared = stack_allocation[
+#             warps, dtype, address_space = AddressSpace.SHARED
+#         ]()
+
+#         t1x, t1y, t2y = block_idx.x, thread_idx.x, block_idx.y
+
+#         mulval = t1[t1x, t1y] * t2[t1y, t2y]
+#         shared[t1y // 32] = warp.sum(mulval)[0]
+
+#         barrier()
+
+#         if t1y == 0:
+#             to[t1x, t2y] = shared.load[
+#                 width = next_power_of_two(warps)
+#             ]().reduce_add()
+
+#     ctx.enqueue_function[dot_gpu](t1, t2, to, grid_dim=(x, z), block_dim=y)
+
+#     return tob, to
 
 
 # fn add[
@@ -276,96 +372,12 @@ fn softmax[
     tob, to = enqueue_create_matrix[rows=rows, cols=cols, dtype = ti.dtype](ctx)
 
     # CALC THE MAX VALUE IN ALL THE BUFFER
-    max_v = Scalar[dtype]()
-
-    host = ctx.enqueue_create_host_buffer[dtype](rows * cols)
-    tib.enqueue_copy_to(host)
-    t = LayoutTensor[dtype, Layout.row_major(rows, cols)](host)
-
-    ctx.synchronize()
-
-    # TODO: Improve Performance
-    for r in range(rows):
-        for c in range(cols):
-            max_v = max(t[r, c].reduce_max(), max_v)
-
-    print("Expected:", max_v)
-    # reduce_1 = t.reshape[Layout.row_major(1024, warps)]()
-
-    # Trying to improve perf.
-    # 1. Reshape the tensor, to have the closest value to 1024 in it's rows
-    #  This can be done:
-
-    elems = cols * rows
-
-    new_rows = 1024
-    while elems % new_rows != 0:
-        new_rows -= 1
-
-    # new_cols = elems // new_rows
-    # out = ctx.enqueue_create_buffer[dtype](rows * cols)
-    # out_t = LayoutTensor[dtype, Layout.row_major(cols * rows)](out)
-    # out.enqueue_copy_from(tib)
-
-    # fn all_max(
-    #     rd: Int,
-    #     cd: Int,
-    #     t: __type_of(out_t),
-    # ):
-    #     if thread_idx.x == 0 and block_idx.x == 0:
-    #         print(
-    #             "shared size:",
-    #             (rd // 32) + (1 if rd % 32 > 0 else 0),
-    #         )
-    #         print("shape:", rd, cd)
-
-    #     shared = stack_allocation[
-    #         32, dtype, address_space = AddressSpace.SHARED
-    #     ]()
-
-    #     r, c = thread_idx.x, block_idx.x
-    #     tvalue = t[r * cd + c][0]
-    #     shared[r // 32] = warp.max(tvalue)
-
-    #     barrier()
-
-    #     if thread_idx.x == 0:
-    #         # print("Warp Value:", shared.load[width=32]())
-    #         max = shared.load[width=32]().reduce_max()
-    #         t[c] = max
-
-    # ctx.enqueue_function[all_max](
-    #     new_rows,
-    #     new_cols,
-    #     out,
-    #     grid_dim=new_cols,
-    #     block_dim=new_rows,
-    # )
-
-    # while new_cols != 1:
-    #     elems, new_rows = new_cols, 1024
-    #     while elems % new_rows != 0:
-    #         new_rows -= 1
-    #     new_cols = elems // new_rows
-    #     print(elems, new_rows, new_cols)
-
-    #     ctx.enqueue_function[all_max](
-    #         new_rows,
-    #         new_cols,
-    #         out,
-    #         out,
-    #         grid_dim=new_cols,
-    #         block_dim=new_rows,
-    #     )
-
-    # final = ctx.enqueue_create_host_buffer[dtype](1)
-    # final.enqueue_copy_from(out.create_sub_buffer[dtype](0, 1))
-    # print("Got:", final)
+    max_v = matrix_max(ctx, ti)
 
     # Do the exponential calculation
-    fn _exp(ti: __type_of(to), max: Scalar[dtype], to: __type_of(to)):
+    fn _exp(ti: __type_of(to), max: __type_of(max_v), to: __type_of(to)):
         c, r = block_idx.x, thread_idx.x
-        to[r, c] = e ** (ti[r, c] - max)
+        to[r, c] = e ** (ti[r, c] - max[0])
 
     ctx.enqueue_function[_exp](ti, max_v, to, grid_dim=cols, block_dim=rows)
 
@@ -433,3 +445,42 @@ fn forward_propagation[
     z2b, z2 = dot_add(ctx, w2, a1, b2)
     a2b, a2 = softmax(ctx, z2b, z2)
     return (z1b, z1), (a1b, a1), (z2b, z2), (a2b, a2)
+
+
+fn backward_propagation[
+    xr: Int, xc: Int, w1r: Int, w2r: Int, dtype: DType
+](
+    ctx: DeviceContext,
+    z1: LayoutTensor[dtype, Layout.row_major(w1r, xc)],
+    a1: LayoutTensor[dtype, Layout.row_major(w1r, xc)],
+    # z2: LayoutTensor[dtype, Layout.row_major(w2r, xc)],
+    a2: LayoutTensor[dtype, Layout.row_major(w2r, xc)],
+    # w1: LayoutTensor[dtype, Layout.row_major(w1r, xr)],
+    w2: LayoutTensor[dtype, Layout.row_major(w2r, w1r)],
+    x: LayoutTensor[dtype, Layout.row_major(xr, xc)],
+    # y: LayoutTensor[dtype, Layout.row_major(xr, xc)],
+    one_hot_y: LayoutTensor[dtype, Layout.row_major(w2r, xc)],
+) raises -> (
+    Int,
+    # LayoutTensor[dtype, Layout.row_major(xr, xc), MutableAnyOrigin],
+    # LayoutTensor[dtype, Layout.row_major(xr, xc), MutableAnyOrigin],
+    # LayoutTensor[dtype, Layout.row_major(xr, xc), MutableAnyOrigin],
+    # LayoutTensor[dtype, Layout.row_major(xr, xc), MutableAnyOrigin],
+):
+    _, dz2 = enqueue_create_matrix[rows=w2r, cols=xc, dtype=dtype](ctx)
+
+    fn sub(a: __type_of(a2), b: __type_of(one_hot_y), out: __type_of(dz2)):
+        r, c = thread_idx.x, block_idx.x
+        out[r, c] = a[r, c] - b[r, c]
+
+    ctx.enqueue_function[sub](a2, one_hot_y, dz2, grid_dim=xc, block_dim=w2r)
+
+    # I'll not transpose, but I'll access the
+    # a1t = a1.transpose()
+    # dot(ctx, dz2, a1t)
+
+    return (1,)
+
+
+# dz2 = a2 - one_hot_y
+# dw2 = 1 / m * dz2.dot(dz2)

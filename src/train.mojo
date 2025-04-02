@@ -41,13 +41,13 @@ fn main() raises:
 
     gpu = get_gpu()
 
-    w1b, w1 = enqueue_create_matrix[
-        10, img_pixels, dtype=dtype, randomize=True
-    ](gpu)
+    _, w1 = enqueue_create_matrix[10, img_pixels, dtype=dtype, randomize=True](
+        gpu
+    )
 
-    b1b, b1 = enqueue_create_matrix[10, 1, dtype=dtype, randomize=True](gpu)
-    w2b, w2 = enqueue_create_matrix[10, 10, dtype=dtype, randomize=True](gpu)
-    b2b, b2 = enqueue_create_matrix[10, 1, dtype=dtype, randomize=True](gpu)
+    _, b1 = enqueue_create_matrix[10, 1, dtype=dtype, randomize=True](gpu)
+    _, w2 = enqueue_create_matrix[10, 10, dtype=dtype, randomize=True](gpu)
+    _, b2 = enqueue_create_matrix[10, 1, dtype=dtype, randomize=True](gpu)
 
     print("load train to gpu")
     xb, x = enqueue_create_matrix[img_pixels, train_size, dtype=dtype](gpu)
@@ -70,19 +70,20 @@ fn main() raises:
 
     # gpu.enqueue_function[print_image](x, grid_dim=1, block_dim=1)
 
-    alias iterations = 500
-    (z1b, z1), (a1b, a1), (z2b, z2), (a2b, a2) = forward_propagation(
-        gpu, w1, b1, w2, b2, x
-    )
+    # alias iterations = 500
+    alias iterations = 10
 
-    # print_matrix[28, 28](gpu, z1b, z1)
-    # for i in range(iterations):
-    #     z1, a1, z2, a2 = forward_propagation(gpu, w1, b1, w2, b2, x)
-    # Backward propagation
-    # update parameters
+    for i in range(iterations):
+        # Forward propagation
+        (z1b, z1), (a1b, a1), (z2b, z2), (a2b, a2) = forward_propagation(
+            gpu, w1, b1, w2, b2, x
+        )
+        # Backward propagation
 
-    # if i % 10 == 0:
-    #     print("Iteration:", i)
+        # update parameters
+
+        if i % 10 == 0:
+            print("Iteration:", i)
     # preditions = get_predictions(a2)
     # print("Accuracy:", get_accuracy(predictions, y))
 
