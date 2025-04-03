@@ -1,5 +1,5 @@
 from gpu.host import DeviceContext, DeviceBuffer, HostBuffer
-from layout import Layout, LayoutTensor
+from layout import Layout as LY, LayoutTensor, IntTuple
 from layout.math import sum
 from data_traits import HasData
 
@@ -19,6 +19,14 @@ alias MAX_BLOCKS_2D = sqrt(MAX_BLOCKS_1D)
 
 alias MAX_BLOCKS_3D = MAX_BLOCKS_1D ** (1 / 3)
 """The max for 3D blocks."""
+
+
+fn Layout(x: Int, y: Int) -> LY:
+    return LY(IntTuple(x, y))
+
+
+fn Layout(x: Int) -> LY:
+    return LY(IntTuple(x))
 
 
 fn get_gpu() raises -> DeviceContext:
@@ -61,7 +69,7 @@ fn enqueue_gpu_to_host[
 
 
 fn enqueue_buf_to_tensor[
-    dtype: DType, //, layout: Layout
+    dtype: DType, //, layout: LY
 ](ctx: DeviceContext, b: DeviceBuffer[dtype]) -> LayoutTensor[
     dtype, layout, b.origin
 ]:
@@ -80,10 +88,9 @@ fn enqueue_create_matrix[
     *,
     dtype: DType,
     randomize: Bool = False,
-    layout: Layout = Layout.row_major(size),
 ](ctx: DeviceContext) raises -> (
     DeviceBuffer[dtype],
-    LayoutTensor[dtype, layout, MutableAnyOrigin],
+    LayoutTensor[dtype, Layout(size), MutableAnyOrigin],
 ):
     var b = enqueue_create_buf[dtype](ctx, size)
 
@@ -91,20 +98,19 @@ fn enqueue_create_matrix[
     if randomize:
         enqueue_randomize(ctx, b)
 
-    return b, enqueue_buf_to_tensor[layout](ctx, b)
+    return b, enqueue_buf_to_tensor[Layout(size)](ctx, b)
 
 
 fn enqueue_create_matrix[
-    rows: Int,
-    cols: Int,
-    *,
+    layout: LY,
     dtype: DType,
     randomize: Bool = False,
-    layout: Layout = Layout.row_major(rows, cols),
 ](ctx: DeviceContext) raises -> (
     DeviceBuffer[dtype],
     LayoutTensor[dtype, layout, MutableAnyOrigin],
 ):
+    alias rows = layout.shape[0].value()
+    alias cols = layout.shape[1].value()
     var b = enqueue_create_buf[dtype](ctx, rows * cols)
 
     @parameter
@@ -114,9 +120,26 @@ fn enqueue_create_matrix[
     return b, enqueue_buf_to_tensor[layout](ctx, b)
 
 
+fn enqueue_create_matrix[
+    randomize: Bool = False,
+](ctx: DeviceContext, like: LayoutTensor) raises -> (
+    DeviceBuffer[like.dtype],
+    LayoutTensor[like.dtype, like.layout, MutableAnyOrigin],
+):
+    alias rows = like.shape[0]()
+    alias cols = like.shape[1]()
+    var b = enqueue_create_buf[like.dtype](ctx, rows * cols)
+
+    @parameter
+    if randomize:
+        enqueue_randomize(ctx, b)
+
+    return b, enqueue_buf_to_tensor[like.layout](ctx, b)
+
+
 fn enqueue_images_to_gpu_matrix[
     img_type: HasData,
-    layout: Layout,
+    layout: LY,
 ](
     ctx: DeviceContext,
     buff: DeviceBuffer[img_type.dtype],
@@ -137,6 +160,7 @@ fn enqueue_images_to_gpu_matrix[
     if img_type.size != pixels:
         abort("Img pixels didn't matck")
 
+    ctx.synchronize()
     for pixel in range(pixels):
         for image in range(images_):
             control = Int(images[image].get_data()[pixel])

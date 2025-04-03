@@ -28,7 +28,6 @@ fn max[
 ](
     ctx: DeviceContext,
     ti: LayoutTensor[dtype, Layout.row_major(rows, cols)],
-    # tib: DeviceBuffer[dtype],
 ) raises -> Scalar[dtype]:
     host_buff = ctx.enqueue_create_host_buffer[dtype](1)
 

@@ -4,8 +4,9 @@ from gpu_mem import (
     get_gpu,
     enqueue_create_matrix,
     enqueue_images_to_gpu_matrix,
+    Layout,
 )
-from gpu_ops import forward_propagation, print_matrix
+from gpu_ops import forward_propagation
 from bit import next_power_of_two
 from gpu.id import block_idx
 
@@ -41,18 +42,15 @@ fn main() raises:
 
     gpu = get_gpu()
 
-    _, w1 = enqueue_create_matrix[10, img_pixels, dtype=dtype, randomize=True](
-        gpu
-    )
-
-    _, b1 = enqueue_create_matrix[10, 1, dtype=dtype, randomize=True](gpu)
-    _, w2 = enqueue_create_matrix[10, 10, dtype=dtype, randomize=True](gpu)
-    _, b2 = enqueue_create_matrix[10, 1, dtype=dtype, randomize=True](gpu)
+    alias w1_layout = Layout(10, img_pixels)
+    _, w1 = enqueue_create_matrix[Layout(10, img_pixels), dtype, True](gpu)
+    _, b1 = enqueue_create_matrix[Layout(10, 1), dtype, randomize=True](gpu)
+    _, w2 = enqueue_create_matrix[Layout(10, 10), dtype, randomize=True](gpu)
+    _, b2 = enqueue_create_matrix[Layout(10, 1), dtype, randomize=True](gpu)
 
     print("load train to gpu")
-    xb, x = enqueue_create_matrix[img_pixels, train_size, dtype=dtype](gpu)
+    xb, x = enqueue_create_matrix[Layout(img_pixels, train_size), dtype](gpu)
     enqueue_images_to_gpu_matrix(gpu, xb, x, images)
-    gpu.synchronize()
 
     # fn print_image(x: __type_of(x)):
     #     alias px = next_power_of_two(img_pixels)
@@ -75,9 +73,8 @@ fn main() raises:
 
     for i in range(iterations):
         # Forward propagation
-        (z1b, z1), (a1b, a1), (z2b, z2), (a2b, a2) = forward_propagation(
-            gpu, w1, b1, w2, b2, x
-        )
+        # z1, a1 = forward_propagation(gpu, x, w1, b1, w2, b2)
+        z1, a1, z2, a2 = forward_propagation(gpu, x, w1, b1, w2, b2)
         # Backward propagation
 
         # update parameters
