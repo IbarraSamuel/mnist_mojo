@@ -103,8 +103,10 @@ from math import e
 #     return out_t
 
 
-fn matrix_max[
-    dtype: DType, //
+fn matrix_reduce[
+    dtype: DType, //,
+    warp_op: fn[dt: DType, w: Int, //] (SIMD[dt, w]) -> SIMD[dt, w],
+    simd_op: fn[d: DType, s: Int] (SIMD[d, s]) -> SIMD[d, 1],
 ](
     ctx: DeviceContext,
     ti: LayoutTensor[dtype],
@@ -133,13 +135,13 @@ fn matrix_max[
         rr, rc = idx // cols, idx % cols
 
         tvalue = t[rr, rc][0]
-        value = warp.max(tvalue)
+        value = warp_op(tvalue)
         shared[r // 32] = value
 
         barrier()
 
         if thread_idx.x == 0:
-            max = shared.load[width=32]().reduce_max()
+            max = simd_op(shared.load[width=32]())
             lr, lc = c // cols, c % cols
             t[lr, lc] = max
 
@@ -298,36 +300,6 @@ fn dot[
     return to
 
 
-# fn add[
-#     x: Int, y: Int, dtype: DType
-# ](
-#     ctx: DeviceContext,
-#     t1: LayoutTensor[dtype, Layout.row_major(x, y)],
-#     t2: LayoutTensor[dtype, Layout.row_major(x, 1)],
-# ) raises -> (
-#     DeviceBuffer[dtype],
-#     LayoutTensor[dtype, Layout.row_major(x, y), MutableAnyOrigin],
-# ):
-#     # Assume that t1.cols is the largest
-#     tob, to = enqueue_create_matrix[rows=x, cols=y, dtype=dtype](ctx)
-
-#     fn add_gpu(
-#         t1: __type_of(t1),
-#         t2: __type_of(t2),
-#         to: __type_of(to),
-#     ):
-#         t1x, t1y = thread_idx.x, block_idx.x
-#         constrained[
-#             t1.shape[0]() == t2.shape[0](),
-#             "Dims does not match between t1 and t2.",
-#         ]()
-#         to[t1x, t1y] = t1[t1x, t1y] * t2[t1x, 0]
-
-#     ctx.enqueue_function[add_gpu](t1, t2, to, grid_dim=y, block_dim=x)
-
-#     return tob, to
-
-
 fn add[
     dtype: DType
 ](
@@ -352,14 +324,149 @@ fn add[
         to: __type_of(to),
     ):
         xi, yi = thread_idx.x, block_idx.x
-        to[xi, yi] = t1[xi, yi] * t2[xi, 0]
+        to[xi, yi] = t1[xi, yi] + t2[xi, 0]
 
     ctx.enqueue_function[add_gpu](t1, t2, to, grid_dim=y, block_dim=x)
 
     return to
 
 
-# fn dot_add[
+fn add[
+    dtype: DType,
+    layout: LY,
+](
+    ctx: DeviceContext,
+    t1: LayoutTensor[dtype, layout],
+    t2: LayoutTensor[dtype, layout],
+) raises -> LayoutTensor[dtype, layout, MutableAnyOrigin]:
+    alias rows = t1.shape[0]()
+    alias cols = t1.shape[1]()
+    _, out = enqueue_create_matrix(ctx, like=t1)
+
+    fn add_gpu(a: __type_of(t1), b: __type_of(t2), out: __type_of(out)):
+        r, c = thread_idx.x, block_idx.x
+        out[r, c] = a[r, c] + b[r, c]
+
+    ctx.enqueue_function[add_gpu](t1, t2, out, grid_dim=cols, block_dim=rows)
+
+    return out
+
+
+fn sub[
+    dtype: DType
+](
+    ctx: DeviceContext,
+    t1: LayoutTensor[dtype],
+    t2: LayoutTensor[dtype],
+) raises -> LayoutTensor[t1.dtype, t1.layout, MutableAnyOrigin]:
+    alias x = t1.shape[0]()
+    alias y = t1.shape[1]()
+    alias x2 = t2.shape[0]()
+    alias dim1 = t2.shape[1]()
+
+    constrained[x == x2, "dims should match"]()
+    constrained[dim1 == 1, "dim should be 1"]()
+
+    # Assume that t1.cols is the largest
+    _tob, to = enqueue_create_matrix(ctx, like=t1)
+
+    fn sub_gpu(
+        t1: __type_of(t1),
+        t2: __type_of(t2),
+        to: __type_of(to),
+    ):
+        xi, yi = thread_idx.x, block_idx.x
+        to[xi, yi] = t1[xi, yi] - t2[xi, 0]
+
+    ctx.enqueue_function[sub_gpu](t1, t2, to, grid_dim=y, block_dim=x)
+
+    return to
+
+
+fn sub[
+    dtype: DType,
+    layout: LY,
+](
+    ctx: DeviceContext,
+    t1: LayoutTensor[dtype, layout],
+    t2: LayoutTensor[dtype, layout],
+) raises -> LayoutTensor[dtype, layout, MutableAnyOrigin]:
+    alias rows = t1.shape[0]()
+    alias cols = t1.shape[1]()
+    _, out = enqueue_create_matrix(ctx, like=t1)
+
+    fn sub_gpu(a: __type_of(t1), b: __type_of(t2), out: __type_of(out)):
+        r, c = thread_idx.x, block_idx.x
+        out[r, c] = a[r, c] - b[r, c]
+
+    ctx.enqueue_function[sub_gpu](t1, t2, out, grid_dim=cols, block_dim=rows)
+
+    return out
+
+
+fn mul[
+    dtype: DType,
+    layout: LY,
+](
+    ctx: DeviceContext,
+    t1: LayoutTensor[dtype, layout],
+    t2: LayoutTensor[dtype, layout],
+) raises -> LayoutTensor[dtype, layout, MutableAnyOrigin]:
+    alias rows = t1.shape[0]()
+    alias cols = t1.shape[1]()
+    _, out = enqueue_create_matrix(ctx, like=t1)
+
+    fn mul_gpu(a: __type_of(t1), b: __type_of(t2), out: __type_of(out)):
+        r, c = thread_idx.x, block_idx.x
+        out[r, c] = a[r, c] * b[r, c]
+
+    ctx.enqueue_function[mul_gpu](t1, t2, out, grid_dim=cols, block_dim=rows)
+
+    return out
+
+
+fn mul[
+    dtype: DType,
+    layout: LY,
+](
+    ctx: DeviceContext,
+    t1: LayoutTensor[dtype, layout],
+    t2: Scalar[dtype],
+) raises -> LayoutTensor[dtype, layout, MutableAnyOrigin]:
+    alias rows = t1.shape[0]()
+    alias cols = t1.shape[1]()
+    _, out = enqueue_create_matrix(ctx, like=t1)
+
+    fn mul_gpu(a: __type_of(t1), b: __type_of(t2), out: __type_of(out)):
+        r, c = thread_idx.x, block_idx.x
+        out[r, c] = a[r, c] * b
+
+    ctx.enqueue_function[mul_gpu](t1, t2, out, grid_dim=cols, block_dim=rows)
+
+    return out
+
+
+fn div[
+    dtype: DType,
+    layout: LY,
+](
+    ctx: DeviceContext,
+    t1: LayoutTensor[dtype, layout],
+    t2: LayoutTensor[dtype, layout],
+) raises -> LayoutTensor[dtype, layout, MutableAnyOrigin]:
+    alias rows = t1.shape[0]()
+    alias cols = t1.shape[1]()
+    _, out = enqueue_create_matrix(ctx, like=t1)
+
+    fn div_gpu(a: __type_of(t1), b: __type_of(t2), out: __type_of(out)):
+        r, c = thread_idx.x, block_idx.x
+        out[r, c] = a[r, c] / b[r, c]
+
+    ctx.enqueue_function[div_gpu](t1, t2, out, grid_dim=cols, block_dim=rows)
+
+    return out
+
+
 #     x: Int, y: Int, z: Int, dtype: DType
 # ](
 #     ctx: DeviceContext,
@@ -509,7 +616,7 @@ fn softmax[
     _tob, to = enqueue_create_matrix(ctx, like=ti)
 
     # CALC THE MAX VALUE IN ALL THE BUFFER
-    max_v = matrix_max(ctx, ti)
+    max_v = matrix_reduce[warp.max, SIMD.reduce_max](ctx, ti)
 
     # Do the exponential calculation
     fn _exp(ti: __type_of(to), max: __type_of(max_v), to: __type_of(to)):
@@ -584,33 +691,35 @@ fn softmax[
 #     return (z1b, z1), (a1b, a1), (z2b, z2), (a2b, a2)
 
 
-# fn forward_propagation[
-#     r: Int, c: Int, a: Int, b: Int, dtype: DType
-# ](
-#     ctx: DeviceContext,
-#     x: LayoutTensor[dtype, Layout(r, c), MutableAnyOrigin],
-#     w1: LayoutTensor[dtype, Layout(a, r), MutableAnyOrigin],
-#     b1: LayoutTensor[dtype, Layout(a, 1), MutableAnyOrigin],
-#     w2: LayoutTensor[dtype, Layout(b, a), MutableAnyOrigin],
-#     b2: LayoutTensor[dtype, Layout(b, 1), MutableAnyOrigin],
-# ) raises -> (
-#     LayoutTensor[dtype, Layout(a, c), MutableAnyOrigin],
-#     LayoutTensor[dtype, Layout(a, c), MutableAnyOrigin],
-#     LayoutTensor[dtype, Layout(b, c), MutableAnyOrigin],
-#     LayoutTensor[dtype, Layout(b, c), MutableAnyOrigin],
-# ):
-#     # The problem is in the dot product.
-#     _d1 = dot[a, r, c](ctx, w1, x)
-#     z1 = add(ctx, _d1, b1)
+fn forward_propagation[
+    r: Int, c: Int, a: Int, b: Int, dtype: DType
+](
+    ctx: DeviceContext,
+    x: LayoutTensor[dtype, Layout(r, c), MutableAnyOrigin],
+    w1: LayoutTensor[dtype, Layout(a, r), MutableAnyOrigin],
+    b1: LayoutTensor[dtype, Layout(a, 1), MutableAnyOrigin],
+    w2: LayoutTensor[dtype, Layout(b, a), MutableAnyOrigin],
+    b2: LayoutTensor[dtype, Layout(b, 1), MutableAnyOrigin],
+) raises -> (
+    LayoutTensor[dtype, Layout(a, c), MutableAnyOrigin],
+    LayoutTensor[dtype, Layout(a, c), MutableAnyOrigin],
+    LayoutTensor[dtype, Layout(b, c), MutableAnyOrigin],
+    LayoutTensor[dtype, Layout(b, c), MutableAnyOrigin],
+):
+    # The problem is in the dot product.
+    alias D = LayoutTensor[dtype, Layout(a, c), MutableAnyOrigin]
+    _d1 = rebind[D](dot(ctx, w1, x))  # Why it doesn't work automagically?
+    z1 = add(ctx, _d1, b1)
 
-#     a1 = relu(ctx, z1)
+    a1 = relu(ctx, z1)
 
-#     _d2 = dot[b, a, c](ctx, w2, a1)
-#     z2 = add(ctx, _d2, b2)
+    alias D2 = LayoutTensor[dtype, Layout(b, c), MutableAnyOrigin]
+    _d2 = rebind[D2](dot(ctx, w2, a1))  # Why it doesn't work automagically?
+    z2 = add(ctx, _d2, b2)
 
-#     a2 = softmax(ctx, z2)
+    a2 = softmax(ctx, z2)
 
-#     return z1, a1, z2, a2
+    return z1, a1, z2, a2
 
 
 fn forward_propagation[
@@ -641,9 +750,8 @@ fn forward_propagation[
     constrained[b2.shape[1]() == 1]()
 
     # The problem is in the dot product.
-    _d1 = rebind[LayoutTensor[dtype, Layout(a, c), MutableAnyOrigin]](
-        dot(ctx, w1, x)
-    )
+    _d1 = dot(ctx, w1, x)
+
     z1 = add(ctx, _d1, b1)
 
     a1 = relu(ctx, z1)
@@ -687,39 +795,84 @@ fn forward_propagation[
 #     return z1, a1, z2, a2
 
 
+fn der_relu[
+    dtype: DType
+](ctx: DeviceContext, t: LayoutTensor[dtype]) raises -> LayoutTensor[
+    dtype, t.layout, MutableAnyOrigin
+]:
+    alias rows = t.shape[0]()
+    alias cols = t.shape[1]()
+    _, out = enqueue_create_matrix(ctx, like=t)
+
+    fn is_positive(t: __type_of(t), o: __type_of(out)):
+        r, c = thread_idx.x, block_idx.x
+        o[r, c] = (t[r, c] > 0).cast[dtype]()
+
+    ctx.enqueue_function[is_positive](t, out, grid_dim=cols, block_dim=rows)
+
+
+fn one_hot_y[
+    dtype: DType, y_len: Int, max_y: Int
+](
+    ctx: DeviceContext, t: LayoutTensor[dtype, Layout(y_len)]
+) raises -> LayoutTensor[dtype, Layout(max_y + 1, y_len), MutableAnyOrigin]:
+    alias layout = Layout(y_len, max_y + 1)
+    yb, y = enqueue_create_matrix[layout=layout, dtype=dtype](ctx)
+    yb = yb.enqueue_fill(0)
+
+    # Need to do the one hot thing.
+
+    yt = rebind[
+        LayoutTensor[dtype, Layout(max_y + 1, y_len), MutableAnyOrigin]
+    ](y.transpose())
+    return yt
+
+
 fn backward_propagation[
     xr: Int, xc: Int, w1r: Int, w2r: Int, dtype: DType
 ](
     ctx: DeviceContext,
+    x: LayoutTensor[dtype, Layout(xr, xc)],
     z1: LayoutTensor[dtype, Layout(w1r, xc)],
-    a1: LayoutTensor[dtype, Layout(w1r, xc)],
+    a1: LayoutTensor[dtype, z1.layout],
     # z2: LayoutTensor[dtype, Layout.row_major(w2r, xc)],
     a2: LayoutTensor[dtype, Layout(w2r, xc)],
     # w1: LayoutTensor[dtype, Layout.row_major(w1r, xr)],
     w2: LayoutTensor[dtype, Layout(w2r, w1r)],
-    x: LayoutTensor[dtype, Layout(xr, xc)],
     # y: LayoutTensor[dtype, Layout.row_major(xr, xc)],
-    one_hot_y: LayoutTensor[dtype, Layout(w2r, xc)],
+    one_hot_y: LayoutTensor[dtype, a2.layout],
 ) raises -> (
-    Int,
-    # LayoutTensor[dtype, Layout.row_major(xr, xc), MutableAnyOrigin],
-    # LayoutTensor[dtype, Layout.row_major(xr, xc), MutableAnyOrigin],
-    # LayoutTensor[dtype, Layout.row_major(xr, xc), MutableAnyOrigin],
-    # LayoutTensor[dtype, Layout.row_major(xr, xc), MutableAnyOrigin],
+    LayoutTensor[dtype, Layout(w1r, xr), MutableAnyOrigin],
+    LayoutTensor[dtype, Layout(1), MutableAnyOrigin],
+    LayoutTensor[dtype, Layout(w2r, w1r), MutableAnyOrigin],
+    LayoutTensor[dtype, Layout(1), MutableAnyOrigin],
 ):
-    _, dz2 = enqueue_create_matrix[dtype=dtype, layout = Layout(w2r, xc)](ctx)
+    alias m = x.shape[1]()
+    alias mi = (1 / m).cast[dtype]()
 
-    fn sub(a: __type_of(a2), b: __type_of(one_hot_y), out: __type_of(dz2)):
-        r, c = thread_idx.x, block_idx.x
-        out[r, c] = a[r, c] - b[r, c]
+    dz2 = sub(ctx, a2, one_hot_y)
+    alias _DW2 = LayoutTensor[dtype, Layout(w2r, w1r), MutableAnyOrigin]
+    _dw2 = dot(ctx, sub(ctx, a2, one_hot_y), a1.transpose())
+    dw2 = mul(ctx, rebind[_DW2](_dw2), mi)
 
-    ctx.enqueue_function[sub](a2, one_hot_y, dz2, grid_dim=xc, block_dim=w2r)
+    sum_dz2 = matrix_reduce[warp_op = warp.sum, simd_op = SIMD.reduce_add](
+        ctx, dz2
+    )
+    db2 = mul(ctx, sum_dz2, mi)
+    alias _DZ1 = LayoutTensor[dtype, Layout(w1r, xc), MutableAnyOrigin]
+    _dz1 = dot(ctx, w2.transpose(), dz2)
+    drelu = der_relu(ctx, z1)
+    dz1 = mul(ctx, rebind[_DZ1](_dz1), drelu)
 
-    # I'll not transpose, but I'll access the
-    a1t = a1.transpose()
-    _ = dot(ctx, dz2, a1t)
+    alias _DW1 = LayoutTensor[dtype, Layout(w1r, xr), MutableAnyOrigin]
+    _dw1 = dot(ctx, dz1, x.transpose())
+    dw1 = mul(ctx, rebind[_DW1](_dw1), mi)
 
-    return (1,)
+    max_dz1 = matrix_reduce[warp_op = warp.sum, simd_op = SIMD.reduce_add](
+        ctx, dz1
+    )
+    db1 = mul(ctx, max_dz1, mi)
+    return dw1, db1, dw2, db2
 
 
 # dz2 = a2 - one_hot_y

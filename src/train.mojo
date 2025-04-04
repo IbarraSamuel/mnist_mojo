@@ -3,10 +3,11 @@ from load_file import read_image_file
 from gpu_mem import (
     get_gpu,
     enqueue_create_matrix,
+    enqueue_create_labels,
     enqueue_images_to_gpu_matrix,
     Layout,
 )
-from gpu_ops import forward_propagation
+from gpu_ops import forward_propagation, backward_propagation, one_hot_y
 from bit import next_power_of_two
 from gpu.id import block_idx
 
@@ -52,30 +53,18 @@ fn main() raises:
     xb, x = enqueue_create_matrix[Layout(img_pixels, train_size), dtype](gpu)
     enqueue_images_to_gpu_matrix(gpu, xb, x, images)
 
-    # fn print_image(x: __type_of(x)):
-    #     alias px = next_power_of_two(img_pixels)
-    #     alias chars = " .,:-=+*#%@"
-    #     alias charset_size = len(chars)
-    #     tot = Float32()
-    #     for i in range(img_pixels):
-    #         v = x[i, block_idx.x + 4].reduce_add()
-    #         idx = (v / 255.0) * (charset_size - 1)
-    #         print(chars[idx.cast[DType.uint8]()], end="")
-    #         if i % 28 == 0:
-    #             print()
-    #     if tot > 0.0:
-    #         print(tot)
+    yb, y = enqueue_create_matrix[Layout(train_size), dtype](gpu)
+    enqueue_create_labels(gpu, yb, y, images)
 
-    # gpu.enqueue_function[print_image](x, grid_dim=1, block_dim=1)
+    hot_y = one_hot_y(gpu, y)
 
-    # alias iterations = 500
     alias iterations = 10
 
     for i in range(iterations):
-        # Forward propagation
-        # z1, a1 = forward_propagation(gpu, x, w1, b1, w2, b2)
         z1, a1, z2, a2 = forward_propagation(gpu, x, w1, b1, w2, b2)
+
         # Backward propagation
+        dw1, db1, dw2, db2 = backward_propagation(gpu, x, z1, a1, a2, w2, hot_y)
 
         # update parameters
 

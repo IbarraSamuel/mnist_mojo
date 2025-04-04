@@ -1,4 +1,4 @@
-from data_traits import HasData
+from data_traits import HasData, HasLabel
 from bit import next_power_of_two
 
 alias chars = " .,:-=+*#%@"
@@ -17,7 +17,9 @@ fn print_grayscale[
 alias TrainImage = TrainData[type = DType.uint8]
 
 
-struct TrainData[rows: Int, cols: Int, type: DType](Writable, HasData):
+struct TrainData[rows: Int, cols: Int, type: DType](
+    Writable, HasData, HasLabel
+):
     alias dtype = type
     alias size = cols * rows
     alias simd_size = next_power_of_two(Self.size)
@@ -55,6 +57,9 @@ struct TrainData[rows: Int, cols: Int, type: DType](Writable, HasData):
 
     fn get_data(self) -> Self.Data:
         return self.data
+
+    fn get_label(self) -> Int:
+        return Int(self.label)
 
     fn write_to[w: Writer](self, mut writer: w):
         for i in range(Self.size):

@@ -1,7 +1,7 @@
 from gpu.host import DeviceContext, DeviceBuffer, HostBuffer
 from layout import Layout as LY, LayoutTensor, IntTuple
 from layout.math import sum
-from data_traits import HasData
+from data_traits import HasData, HasLabel
 
 from builtin.builtin_slice import slice
 from os import abort
@@ -165,5 +165,30 @@ fn enqueue_images_to_gpu_matrix[
         for image in range(images_):
             control = Int(images[image].get_data()[pixel])
             local_tensor[pixel, image] = control
+
+    buff.enqueue_copy_from(local_buff)
+
+
+fn enqueue_create_labels[
+    img_type: HasLabel,
+](
+    ctx: DeviceContext,
+    buff: DeviceBuffer,
+    tensor: LayoutTensor[buff.type],
+    images: List[img_type],
+) raises:
+    alias dtype = buff.type
+    local_buff = enqueue_create_host_buf[dtype](ctx, len(buff))
+    local_buff = local_buff.enqueue_fill(0)
+    local_tensor = LayoutTensor[dtype, tensor.layout](local_buff)
+
+    if len(images) != len(buff):
+        abort("Train data len didn't match")
+
+    alias dim: Int = tensor.layout.shape[0].value()
+
+    ctx.synchronize()
+    for i in range(len(images)):
+        local_tensor[i] = images[i].get_label()
 
     buff.enqueue_copy_from(local_buff)
