@@ -56,7 +56,7 @@ fn main() raises:
     yb, y = enqueue_create_matrix[Layout(train_size), dtype](gpu)
     enqueue_create_labels(gpu, yb, y, images)
 
-    hot_y = one_hot_y(gpu, y)
+    hot_y = one_hot_y[max_y=train_size](gpu, y)
 
     alias iterations = 10
 
