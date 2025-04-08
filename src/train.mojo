@@ -44,10 +44,12 @@ fn main() raises:
     gpu = get_gpu()
 
     alias w1_layout = Layout(10, img_pixels)
-    _, w1 = enqueue_create_matrix[Layout(10, img_pixels), dtype, True](gpu)
-    _, b1 = enqueue_create_matrix[Layout(10, 1), dtype, randomize=True](gpu)
-    _, w2 = enqueue_create_matrix[Layout(10, 10), dtype, randomize=True](gpu)
-    _, b2 = enqueue_create_matrix[Layout(10, 1), dtype, randomize=True](gpu)
+    alias max_y = 9
+    alias ldim = max_y + 1
+    _, w1 = enqueue_create_matrix[Layout(ldim, img_pixels), dtype, True](gpu)
+    _, b1 = enqueue_create_matrix[Layout(ldim, 1), dtype, True](gpu)
+    _, w2 = enqueue_create_matrix[Layout(ldim, ldim), dtype, True](gpu)
+    _, b2 = enqueue_create_matrix[Layout(ldim, 1), dtype, True](gpu)
 
     print("load train to gpu")
     xb, x = enqueue_create_matrix[Layout(img_pixels, train_size), dtype](gpu)
@@ -56,16 +58,15 @@ fn main() raises:
     yb, y = enqueue_create_matrix[Layout(train_size), dtype](gpu)
     enqueue_create_labels(gpu, yb, y, images)
 
-    hot_y = one_hot_y[max_y=train_size](gpu, y)
+    # This should match to the max_y + 1 == 10 -> the dimention
+    hot_y = one_hot_y[max_y=9](gpu, y)
 
     alias iterations = 10
 
     for i in range(iterations):
         z1, a1, z2, a2 = forward_propagation(gpu, x, w1, b1, w2, b2)
-
-        # Backward propagation
-        dw1, db1, dw2, db2 = backward_propagation(gpu, x, z1, a1, a2, w2, hot_y)
-
+        # dw1, db1, dw2, db2 = backward_propagation(gpu, x, z1, a1, a2, w2, hot_y)
+        dw2 = backward_propagation(gpu, x, z1, a1, a2, w2, hot_y)
         # update parameters
 
         if i % 10 == 0:

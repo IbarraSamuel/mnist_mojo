@@ -69,11 +69,12 @@ fn enqueue_gpu_to_host[
 
 
 fn enqueue_buf_to_tensor[
-    dtype: DType, //, layout: LY
-](ctx: DeviceContext, b: DeviceBuffer[dtype]) -> LayoutTensor[
-    dtype, layout, b.origin
+    o: MutableOrigin, dtype: DType, //, layout: LY
+](ctx: DeviceContext, ref [o]b: DeviceBuffer[dtype]) -> LayoutTensor[
+    dtype, layout, MutableAnyOrigin
 ]:
-    return LayoutTensor[dtype, layout](b)
+    ly = LayoutTensor[dtype, layout, MutableAnyOrigin](b)
+    return ly
 
 
 fn enqueue_randomize(ctx: DeviceContext, gpu_buffer: DeviceBuffer) raises:
@@ -81,24 +82,6 @@ fn enqueue_randomize(ctx: DeviceContext, gpu_buffer: DeviceBuffer) raises:
     host_buffer = ctx.enqueue_create_host_buffer[gpu_buffer.type](size)
     random.rand(host_buffer.unsafe_ptr(), size, min=-0.1, max=0.1)
     gpu_buffer.enqueue_copy_from(host_buffer)
-
-
-fn enqueue_create_matrix[
-    size: Int,
-    *,
-    dtype: DType,
-    randomize: Bool = False,
-](ctx: DeviceContext) raises -> (
-    DeviceBuffer[dtype],
-    LayoutTensor[dtype, Layout(size), MutableAnyOrigin],
-):
-    var b = enqueue_create_buf[dtype](ctx, size)
-
-    @parameter
-    if randomize:
-        enqueue_randomize(ctx, b)
-
-    return b, enqueue_buf_to_tensor[Layout(size)](ctx, b)
 
 
 fn enqueue_create_matrix[
@@ -117,7 +100,20 @@ fn enqueue_create_matrix[
     if randomize:
         enqueue_randomize(ctx, b)
 
-    return b, enqueue_buf_to_tensor[layout](ctx, b)
+    t = enqueue_buf_to_tensor[layout](ctx, b)
+    return b, t
+
+
+fn enqueue_create_matrix[
+    size: Int,
+    *,
+    dtype: DType,
+    randomize: Bool = False,
+](ctx: DeviceContext) raises -> (
+    DeviceBuffer[dtype],
+    LayoutTensor[dtype, Layout(size), MutableAnyOrigin],
+):
+    return enqueue_create_matrix[Layout(size), dtype, randomize](ctx)
 
 
 fn enqueue_create_matrix[
@@ -126,15 +122,7 @@ fn enqueue_create_matrix[
     DeviceBuffer[like.dtype],
     LayoutTensor[like.dtype, like.layout, MutableAnyOrigin],
 ):
-    alias rows = like.shape[0]()
-    alias cols = like.shape[1]()
-    var b = enqueue_create_buf[like.dtype](ctx, rows * cols)
-
-    @parameter
-    if randomize:
-        enqueue_randomize(ctx, b)
-
-    return b, enqueue_buf_to_tensor[like.layout](ctx, b)
+    return enqueue_create_matrix[like.layout, like.dtype, randomize](ctx)
 
 
 fn enqueue_images_to_gpu_matrix[

@@ -22,11 +22,9 @@ fn arange_data[
     # All jumps represents a newline
     file_rows = len(jumps)
     if size != -1 and file_rows != size:
-        msg = (
-            "Wrong sizes, we found {} newlines, but the size should be {}"
-            .format(len(jumps), size)
-        )
-        os.abort(msg)
+        msg = "Wrong sizes, we found {} newlines, but the size should be {}"
+        err = msg.as_string_slice().format(len(jumps), size)
+        os.abort(err)
 
     frst = TD(data=train_data_string, init=0, end=jumps[0])
     images = List[TD]()
