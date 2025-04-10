@@ -88,6 +88,82 @@ fn matrix_reduce[
     return out_t
 
 
+fn dot_large[
+    dtype: DType
+](
+    ctx: DeviceContext,
+    t1: LayoutTensor[dtype],
+    t2: LayoutTensor[dtype],
+) raises -> LayoutTensor[
+    dtype, Layout(t1.shape[0](), t2.shape[1]()), MutableAnyOrigin
+]:
+    alias x_dim = t1.shape[0]()
+    alias z_dim = t1.shape[1]()
+    alias y_dim = t2.shape[1]()
+    constrained[z_dim == t2.shape[0](), "Dims should match"]()
+
+    buff = ctx.enqueue_create_buffer[dtype](x_dim * y_dim * z_dim)
+
+    out = LayoutTensor[dtype, Layout(x_dim, z_dim, y_dim), MutableAnyOrigin](
+        buff
+    )
+
+    fn dot_large_gpu(t1: __type_of(t1), t2: __type_of(t2), out: __type_of(out)):
+        x, z, y = thread_idx.x, block_idx.x, thread_idx.y
+        out[x, z, y] = t1[x, z] * t2[z, y]
+
+    ctx.enqueue_function[dot_large_gpu](
+        t1, t2, out, grid_dim=z_dim, block_dim=(x_dim, y_dim)
+    )
+
+    alias warps_per_v = z_dim // 32 + (
+        1 if z_dim % 32 > 0 else 0
+    )  # Warps number
+    alias wpv_2pow = next_power_of_two(warps_per_v)
+    alias repeat_threads = warps_per_v // 32 + (
+        1 if warps_per_v % 32 > 0 else 0
+    )  # loops in the same thread
+    alias block_dim = min(1024, z_dim)
+    """If the z dim is very small, don't need to do it bigger than we really need."""
+
+    obuff = ctx.enqueue_create_buffer[dtype](x_dim * y_dim)
+    obuff = obuff.enqueue_fill(0)
+    out2 = LayoutTensor[dtype, Layout(x_dim, y_dim), MutableAnyOrigin](obuff)
+
+    fn reduce_with_warps(out: __type_of(out), out2: __type_of(out2)):
+        shared = stack_allocation[
+            warps_per_v, dtype, address_space = AddressSpace.SHARED
+        ]()
+        x, z, y = block_idx.x, thread_idx.x, block_idx.y
+
+        for blk in range(repeat_threads):
+            # Move the thread 1024 down to calc next portion
+            zb = 1024 * blk + z
+            # get the value out ot the tensor
+            sval = out[x, zb, y][0]
+            # warp into a single value
+            tot = warp.sum(sval)
+
+            # save into the shared location
+            warp_idx = zb // 32
+            shared[warp_idx] = tot
+
+        barrier()
+        if z == 0:
+            final = (
+                shared.load[width=wpv_2pow]()
+                .shift_left[wpv_2pow - warps_per_v]()
+                .reduce_add()
+            )
+            out2[x, y] = final
+
+    ctx.enqueue_function[reduce_with_warps](
+        out, out2, grid_dim=(x_dim, y_dim), block_dim=block_dim
+    )
+
+    return out2
+
+
 fn dot[
     dtype: DType
 ](
@@ -97,6 +173,40 @@ fn dot[
 ) raises -> LayoutTensor[
     dtype, Layout(t1.shape[0](), t2.shape[1]()), MutableAnyOrigin
 ]:
+    """
+    Calc the dot product.
+
+    Assume that t2.cols is the largest.
+    Then, t2.rows is the lowest
+    Then, t1.cols fits in a single block.
+    This is important since we can use warps to aggregate results
+    for a single block.
+    x -> 42000 ==> Largest -> Each one represents a block
+    y -> 10 ==> Shortest -> each one could represent block or thread
+    z -> 784 ==> Medium -> Could be block or thread, preffered to be a thread.
+    Imagine:
+    [1 1] [2 2 2] -> [3 3 3]
+    [1 1] [2 2 2] -> [3 3 3]
+    [1 1]         -> [3 3 3]
+    [1 1]         -> [3 3 3]
+    [1 1]         -> [3 3 3]
+        We can calculate easily the multiplication, since we never depend on x or z
+    We need to load y values from t1 and t2 (in a transpose manner or changing it to col_major), then multiply them
+    to then, reduce add. And we can store it on the desired position
+
+    like:
+    (t1[xi, :] * t2[:, zi]).reduce_add()
+    We can use a minimatrix with the results, to them collapse into a result as an option
+
+    value = t1[xi, yi] * t2[yi, zi]
+    and then, warp them, into another matrix using
+    final[xi, zi] = warp(value)
+    # We can always use the other tecnique to sum sub warps
+
+    x is the rows for the weights -> 10
+    y is the rows for the train data -> 784
+    z is the cols for the train data, and the largest -> 42000
+    """
     alias x = t1.shape[0]()
     alias z = t2.shape[1]()
     alias y = t1.shape[1]()
@@ -107,9 +217,10 @@ fn dot[
         layout = Layout(t1.shape[0](), t2.shape[1]()),
     ](ctx)
 
-    print("For dot product we are using dims:(", x, y, "), (", y2, z, ")")
     # What happen if y > 1024?
     # We will need to collapse multiple blocks into a single value.
+    if y > 1024:
+        return dot_large(ctx, t1, t2)
 
     alias warps = y // 32 + (1 if y % 32 > 0 else 0)
 
@@ -130,9 +241,11 @@ fn dot[
         barrier()
 
         if t1y == 0:
-            to[t1x, t2y] = shared.load[
-                width = next_power_of_two(warps)
-            ]().reduce_add()
+            to[t1x, t2y] = (
+                shared.load[width = next_power_of_two(warps)]()
+                .shift_left[next_power_of_two(warps) - warps]()
+                .reduce_add()
+            )
 
     ctx.enqueue_function[dot_gpu](t1, t2, to, grid_dim=(x, z), block_dim=y)
 

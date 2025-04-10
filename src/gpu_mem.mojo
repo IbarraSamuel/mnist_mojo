@@ -21,6 +21,10 @@ alias MAX_BLOCKS_3D = MAX_BLOCKS_1D ** (1 / 3)
 """The max for 3D blocks."""
 
 
+fn Layout(x: Int, y: Int, z: Int) -> LY:
+    return LY(IntTuple(x, y, z))
+
+
 fn Layout(x: Int, y: Int) -> LY:
     return LY(IntTuple(x, y))
 
