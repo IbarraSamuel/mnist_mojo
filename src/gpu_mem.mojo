@@ -81,6 +81,17 @@ fn enqueue_buf_to_tensor[
     return ly
 
 
+fn enqueue_buf_to_tensor[
+    dtype: DType, layout: LY, o: MutableOrigin
+](
+    ctx: DeviceContext,
+    ref [o]b: DeviceBuffer[dtype],
+    like: LayoutTensor[dtype, layout, o],
+) -> __type_of(like):
+    alias tensor = __type_of(like)
+    return tensor(b)
+
+
 fn enqueue_randomize(ctx: DeviceContext, gpu_buffer: DeviceBuffer) raises:
     size = len(gpu_buffer)
     host_buffer = ctx.enqueue_create_host_buffer[gpu_buffer.type](size)
@@ -124,9 +135,20 @@ fn enqueue_create_matrix[
     randomize: Bool = False,
 ](ctx: DeviceContext, like: LayoutTensor) raises -> (
     DeviceBuffer[like.dtype],
-    LayoutTensor[like.dtype, like.layout, MutableAnyOrigin],
+    __type_of(like),
 ):
-    return enqueue_create_matrix[like.layout, like.dtype, randomize](ctx)
+    alias rows = like.layout.shape[0].value()
+    alias cols = like.layout.shape[1].value()
+    var b = enqueue_create_buf[like.dtype](ctx, rows * cols)
+
+    @parameter
+    if randomize:
+        enqueue_randomize(ctx, b)
+
+    t = enqueue_buf_to_tensor[like.dtype, like.layout, like.origin](
+        ctx, b, like
+    )
+    return b, t
 
 
 fn enqueue_images_to_gpu_matrix[
