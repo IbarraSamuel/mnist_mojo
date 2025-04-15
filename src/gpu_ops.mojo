@@ -129,7 +129,11 @@ fn dot_large[
 
     alias block_dim: Int = min(1024, z_dim)
 
-    print(x_dim, z_dim, y_dim)
+    # ctx.synchronize()
+
+    # print(x_dim, z_dim, y_dim)
+    # print(t1.shape[0](), t1.shape[1](), t2.shape[0](), t2.shape[1]())
+    # print(t1.layout.shape, t2.layout.shape)
 
     alias repeat_threads = z_dim // 1024 + (1 if z_dim % 1024 > 0 else 0)
     """A single block can handle 1024 threads, if we treat each block as one pixel unit,
@@ -139,6 +143,9 @@ fn dot_large[
     If this number is one, then we should recalculate the block_dim
     """
     alias warps = 32  # warps that could be used in a single block execution.
+    # print("Repeat threads:", repeat_threads)
+    # print("Block Dim:", block_dim)
+    # print("warps:", warps)
 
     fn _calc_pixel(t1: __type_of(t1), t2: __type_of(t2), o: __type_of(out)):
         # Each time a warp finishes, we can store it's result here.
@@ -154,9 +161,8 @@ fn dot_large[
             # Move the i index by blk * 1024, since other threads will handle
             # all other values.
             ii = blk * 1024 + i
-
-            result_i = t1[x, ii] * t2[ii, y]
-            result = warp.sum(result_i if ii < z_dim else z)
+            result_i = z if ii >= z_dim else t1[x, ii] * t2[ii, y]
+            result = warp.sum(result_i)
 
             shared[i // warps] += result[0]  # Save in shared block memory
 
@@ -169,6 +175,7 @@ fn dot_large[
         t1, t2, out, grid_dim=(x_dim, y_dim), block_dim=block_dim
     )
 
+    # ctx.synchronize()
     return out
 
 
@@ -662,10 +669,10 @@ fn backward_propagation[
     # y: LayoutTensor[dtype, Layout.row_major(xr, xc)],
     one_hot_y: LayoutTensor[dtype, a2.layout],
 ) raises -> (
-    # LayoutTensor[dtype, Layout(w1r, xr), MutableAnyOrigin],
-    # LayoutTensor[dtype, Layout(1), MutableAnyOrigin],
+    LayoutTensor[dtype, Layout(w1r, xr), MutableAnyOrigin],
+    LayoutTensor[dtype, Layout(1), MutableAnyOrigin],
     LayoutTensor[dtype, Layout(w2r, w1r), MutableAnyOrigin],
-    # LayoutTensor[dtype, Layout(1), MutableAnyOrigin],
+    LayoutTensor[dtype, Layout(1), MutableAnyOrigin],
 ):
     alias m: Int = x.shape[1]()
     alias mi: Scalar[dtype] = (1 / m).cast[dtype]()
@@ -693,11 +700,35 @@ fn backward_propagation[
     xt = rebind[XT](x.transpose())
     # print(dz1.layout.shape, xt.layout.shape)
     _dw1 = dot_large(ctx, dz1, xt)  # ILEGAL ADDRESS
-    # dw1 = mul(ctx, _dw1, mi)
+    dw1 = mul(ctx, _dw1, mi)
 
     # # db1
-    # sum_dz1 = matrix_reduce[warp.sum, SIMD.reduce_add](ctx, dz1)
-    # db1 = mul(ctx, sum_dz1, mi)
-    # return dw1, db1, dw2, db2
+    sum_dz1 = matrix_reduce[warp.sum, SIMD.reduce_add](ctx, dz1)
+    db1 = mul(ctx, sum_dz1, mi)
+    return dw1, db1, dw2, db2
 
-    return (dw2,)
+
+fn update_parameters[
+    dtype: DType, alpha: Scalar[dtype], w1l: LY, b11: Int, w2l: LY, b12: Int
+](
+    ctx: DeviceContext,
+    w1: LayoutTensor[dtype, w1l, MutableAnyOrigin],
+    b1: LayoutTensor[dtype, Layout(b11), MutableAnyOrigin],
+    w2: LayoutTensor[dtype, w2l, MutableAnyOrigin],
+    b2: LayoutTensor[dtype, Layout(b12), MutableAnyOrigin],
+    dw1: LayoutTensor[dtype, w1l],
+    db1: LayoutTensor[dtype, Layout(b11)],
+    dw2: LayoutTensor[dtype, w2l],
+    db2: LayoutTensor[dtype, Layout(b12)],
+    # alpha: Scalar[dtype],
+) raises -> (
+    LayoutTensor[dtype, w1l, MutableAnyOrigin],
+    LayoutTensor[dtype, Layout(b11), MutableAnyOrigin],
+    LayoutTensor[dtype, w2l, MutableAnyOrigin],
+    LayoutTensor[dtype, Layout(b12), MutableAnyOrigin],
+):
+    w1f = sub(ctx, w1, mul(ctx, dw1, alpha))
+    b1f = sub(ctx, b1, mul(ctx, db1, alpha))
+    w2f = sub(ctx, w2, mul(ctx, dw2, alpha))
+    b2f = sub(ctx, b2, mul(ctx, db2, alpha))
+    return w1f, b1f, w2f, b2f

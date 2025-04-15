@@ -7,7 +7,12 @@ from gpu_mem import (
     enqueue_images_to_gpu_matrix,
     Layout,
 )
-from gpu_ops import forward_propagation, backward_propagation, one_hot_y
+from gpu_ops import (
+    forward_propagation,
+    backward_propagation,
+    one_hot_y,
+    update_parameters,
+)
 from bit import next_power_of_two
 from gpu.id import block_idx
 
@@ -62,9 +67,14 @@ fn main() raises:
     hot_y = one_hot_y[max_y=9](gpu, y)
 
     alias iterations = 10
+    alias alpha = Scalar[dtype](0.001)
 
     z1, a1, z2, a2 = forward_propagation(gpu, x, w1, b1, w2, b2)
-    dw2 = backward_propagation(gpu, x, z1, a1, a2, w2, hot_y)
+    dw1, db1, dw2, db2 = backward_propagation(gpu, x, z1, a1, a2, w2, hot_y)
+    w1, b1, w2, b2 = update_parameters[dtype, alpha](
+        gpu, w1, b1, w2, b2, dw1, db1, dw2, db2
+    )
+
     # for i in range(iterations):
     #     z1, a1, z2, a2 = forward_propagation(gpu, x, w1, b1, w2, b2)
     #     dw1, db1, dw2, db2 = backward_propagation(gpu, x, z1, a1, a2, w2, hot_y)
