@@ -47,9 +47,9 @@ fn main() raises:
     alias max_y = 9
     alias ldim = max_y + 1
     _, w1 = enqueue_create_matrix[Layout(ldim, img_pixels), dtype, True](gpu)
-    _, b1 = enqueue_create_matrix[Layout(ldim, 1), dtype, True](gpu)
+    _, b1 = enqueue_create_matrix[size=ldim, dtype=dtype, randomize=True](gpu)
     _, w2 = enqueue_create_matrix[Layout(ldim, ldim), dtype, True](gpu)
-    _, b2 = enqueue_create_matrix[Layout(ldim, 1), dtype, True](gpu)
+    _, b2 = enqueue_create_matrix[size=ldim, dtype=dtype, randomize=True](gpu)
 
     print("load train to gpu")
     xb, x = enqueue_create_matrix[Layout(img_pixels, train_size), dtype](gpu)
@@ -63,14 +63,15 @@ fn main() raises:
 
     alias iterations = 10
 
-    for i in range(iterations):
-        z1, a1, z2, a2 = forward_propagation(gpu, x, w1, b1, w2, b2)
-        # dw1, db1, dw2, db2 = backward_propagation(gpu, x, z1, a1, a2, w2, hot_y)
-        dw2 = backward_propagation(gpu, x, z1, a1, a2, w2, hot_y)
-        # update parameters
+    z1, a1, z2, a2 = forward_propagation(gpu, x, w1, b1, w2, b2)
+    dw2 = backward_propagation(gpu, x, z1, a1, a2, w2, hot_y)
+    # for i in range(iterations):
+    #     z1, a1, z2, a2 = forward_propagation(gpu, x, w1, b1, w2, b2)
+    #     dw1, db1, dw2, db2 = backward_propagation(gpu, x, z1, a1, a2, w2, hot_y)
+    #     # Update parameters
 
-        if i % 10 == 0:
-            print("Iteration:", i)
+    #     if i % 10 == 0:
+    #         print("Iteration:", i)
     # preditions = get_predictions(a2)
     # print("Accuracy:", get_accuracy(predictions, y))
 

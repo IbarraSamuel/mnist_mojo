@@ -81,15 +81,12 @@ fn enqueue_buf_to_tensor[
     return ly
 
 
-fn enqueue_buf_to_tensor[
-    dtype: DType, layout: LY, o: MutableOrigin
-](
+fn enqueue_buf_to_tensor(
     ctx: DeviceContext,
-    ref [o]b: DeviceBuffer[dtype],
-    like: LayoutTensor[dtype, layout, o],
-) -> __type_of(like):
-    alias tensor = __type_of(like)
-    return tensor(b)
+    like: LayoutTensor,
+    mut b: DeviceBuffer[like.dtype],
+) -> LayoutTensor[like.dtype, like.layout, MutableAnyOrigin]:
+    return LayoutTensor[like.dtype, like.layout, MutableAnyOrigin](b)
 
 
 fn enqueue_randomize(ctx: DeviceContext, gpu_buffer: DeviceBuffer) raises:
@@ -135,7 +132,7 @@ fn enqueue_create_matrix[
     randomize: Bool = False,
 ](ctx: DeviceContext, like: LayoutTensor) raises -> (
     DeviceBuffer[like.dtype],
-    __type_of(like),
+    LayoutTensor[like.dtype, like.layout, MutableAnyOrigin],
 ):
     alias rows = like.layout.shape[0].value()
     alias cols = like.layout.shape[1].value()
@@ -145,9 +142,7 @@ fn enqueue_create_matrix[
     if randomize:
         enqueue_randomize(ctx, b)
 
-    t = enqueue_buf_to_tensor[like.dtype, like.layout, like.origin](
-        ctx, b, like
-    )
+    t = enqueue_buf_to_tensor(ctx, like, b)
     return b, t
 
 
@@ -185,10 +180,11 @@ fn enqueue_images_to_gpu_matrix[
 
 fn enqueue_create_labels[
     img_type: HasLabel,
+    ly: LY,
 ](
     ctx: DeviceContext,
     buff: DeviceBuffer,
-    tensor: LayoutTensor[buff.type],
+    tensor: LayoutTensor[buff.type, ly],
     images: List[img_type],
 ) raises:
     alias dtype = buff.type

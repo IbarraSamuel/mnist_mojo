@@ -10,11 +10,13 @@ from gpu_ops import dot
 
 
 fn dot_large[
-    dtype: DType
+    dtype: DType,
+    ly1: Layout,
+    ly2: Layout,
 ](
     ctx: DeviceContext,
-    t1: LayoutTensor[dtype],
-    t2: LayoutTensor[dtype],
+    t1: LayoutTensor[dtype, ly1],
+    t2: LayoutTensor[dtype, ly2],
 ) raises -> LayoutTensor[
     dtype, Layout(IntTuple(t1.shape[0](), t2.shape[1]())), MutableAnyOrigin
 ]:
