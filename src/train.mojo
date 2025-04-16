@@ -12,6 +12,8 @@ from gpu_ops import (
     backward_propagation,
     one_hot_y,
     update_parameters,
+    get_predictions,
+    print_accuracy,
 )
 from bit import next_power_of_two
 from gpu.id import block_idx
@@ -66,23 +68,19 @@ fn main() raises:
     # This should match to the max_y + 1 == 10 -> the dimention
     hot_y = one_hot_y[max_y=9](gpu, y)
 
-    alias iterations = 10
+    alias iterations = 100
     alias alpha = Scalar[dtype](0.001)
 
-    z1, a1, z2, a2 = forward_propagation(gpu, x, w1, b1, w2, b2)
-    dw1, db1, dw2, db2 = backward_propagation(gpu, x, z1, a1, a2, w2, hot_y)
-    w1, b1, w2, b2 = update_parameters[dtype, alpha](
-        gpu, w1, b1, w2, b2, dw1, db1, dw2, db2
-    )
+    for i in range(iterations):
+        z1, a1, _, a2 = forward_propagation(gpu, x, w1, b1, w2, b2)
+        dw1, db1, dw2, db2 = backward_propagation(gpu, x, z1, a1, a2, w2, hot_y)
+        w1, b1, w2, b2 = update_parameters[alpha](
+            gpu, w1, b1, w2, b2, dw1, db1, dw2, db2
+        )
 
-    # for i in range(iterations):
-    #     z1, a1, z2, a2 = forward_propagation(gpu, x, w1, b1, w2, b2)
-    #     dw1, db1, dw2, db2 = backward_propagation(gpu, x, z1, a1, a2, w2, hot_y)
-    #     # Update parameters
-
-    #     if i % 10 == 0:
-    #         print("Iteration:", i)
-    # preditions = get_predictions(a2)
-    # print("Accuracy:", get_accuracy(predictions, y))
+        if i % 10 == 0:
+            print("Iteration:", i)
+            var predictions = get_predictions(gpu, a2)
+            print_accuracy(gpu, predictions, y)
 
     gpu.synchronize()

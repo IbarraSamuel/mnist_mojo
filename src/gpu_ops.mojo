@@ -36,7 +36,7 @@ fn matrix_reduce[
 
     _, out_t = enqueue_create_matrix[size=1, dtype=dtype](ctx)
 
-    fn all_max(
+    fn all_reduce(
         rd: Int,
         cd: Int,
         t: __type_of(ti),
@@ -75,7 +75,7 @@ fn matrix_reduce[
             new_rows -= 1
         new_cols = elems // new_rows
 
-        ctx.enqueue_function[all_max](
+        ctx.enqueue_function[all_reduce](
             new_rows,
             new_cols,
             ti,
@@ -87,6 +87,23 @@ fn matrix_reduce[
         new_rows = 1
 
     return out_t
+
+
+fn argmax_a0[
+    dtype: DType, rows: Int, cols: Int
+](
+    ctx: DeviceContext, t: LayoutTensor[dtype, Layout(rows, cols)]
+) raises -> LayoutTensor[dtype, Layout(cols), MutableAnyOrigin]:
+    _, out = enqueue_create_matrix[Layout(cols), dtype](ctx)
+
+    fn reduce_a0(t: __type_of(t), out: __type_of(out)):
+        r, c = thread_idx.x, block_idx.x
+        val = t[r, c]
+        mx_val = warp.max(val)
+        out[c] = r if val == mx_val else out[c]
+
+    ctx.enqueue_function[reduce_a0](t, out, grid_dim=cols, block_dim=rows)
+    return out
 
 
 fn dot_large[
@@ -128,13 +145,6 @@ fn dot_large[
     out = LayoutTensor[dtype, Layout(x_dim, y_dim), MutableAnyOrigin](buff)
 
     alias block_dim: Int = min(1024, z_dim)
-
-    # ctx.synchronize()
-
-    # print(x_dim, z_dim, y_dim)
-    # print(t1.shape[0](), t1.shape[1](), t2.shape[0](), t2.shape[1]())
-    # print(t1.layout.shape, t2.layout.shape)
-
     alias repeat_threads = z_dim // 1024 + (1 if z_dim % 1024 > 0 else 0)
     """A single block can handle 1024 threads, if we treat each block as one pixel unit,
     Then we need to split the work for the specific pixel within the block.
@@ -143,9 +153,6 @@ fn dot_large[
     If this number is one, then we should recalculate the block_dim
     """
     alias warps = 32  # warps that could be used in a single block execution.
-    # print("Repeat threads:", repeat_threads)
-    # print("Block Dim:", block_dim)
-    # print("warps:", warps)
 
     fn _calc_pixel(t1: __type_of(t1), t2: __type_of(t2), o: __type_of(out)):
         # Each time a warp finishes, we can store it's result here.
@@ -175,7 +182,6 @@ fn dot_large[
         t1, t2, out, grid_dim=(x_dim, y_dim), block_dim=block_dim
     )
 
-    # ctx.synchronize()
     return out
 
 
@@ -332,9 +338,31 @@ fn sub[
         to: __type_of(to),
     ):
         xi, yi = thread_idx.x, block_idx.x
-        to[xi, yi] = t1[xi, yi] - t2[xi, 0]
+        to[xi, yi] = t1[xi, yi] - t2[xi]
 
     ctx.enqueue_function[sub_gpu](t1, t2, to, grid_dim=y, block_dim=x)
+
+    return to
+
+
+fn sub[
+    dtype: DType, a: Int
+](
+    ctx: DeviceContext,
+    t1: LayoutTensor[dtype, Layout(a)],
+    k: LayoutTensor[dtype, Layout(1)],
+) raises -> LayoutTensor[t1.dtype, t1.layout, MutableAnyOrigin]:
+    _tob, to = enqueue_create_matrix(ctx, like=t1)
+
+    fn sub_gpu(
+        t1: __type_of(t1),
+        k: __type_of(k),
+        to: __type_of(to),
+    ):
+        xi = thread_idx.x
+        to[xi] = t1[xi] - k[0]
+
+    ctx.enqueue_function[sub_gpu](t1, k, to, grid_dim=1, block_dim=a)
 
     return to
 
@@ -709,17 +737,17 @@ fn backward_propagation[
 
 
 fn update_parameters[
-    dtype: DType, alpha: Scalar[dtype], w1l: LY, b11: Int, w2l: LY, b12: Int
+    dtype: DType, //, alpha: Scalar[dtype], w1l: LY, b11: Int, w2l: LY, b12: Int
 ](
     ctx: DeviceContext,
-    w1: LayoutTensor[dtype, w1l, MutableAnyOrigin],
-    b1: LayoutTensor[dtype, Layout(b11), MutableAnyOrigin],
-    w2: LayoutTensor[dtype, w2l, MutableAnyOrigin],
-    b2: LayoutTensor[dtype, Layout(b12), MutableAnyOrigin],
+    w1: LayoutTensor[dtype, w1l],
+    b1: LayoutTensor[dtype, Layout(b11)],
+    w2: LayoutTensor[dtype, w2l],
+    b2: LayoutTensor[dtype, Layout(b12)],
     dw1: LayoutTensor[dtype, w1l],
-    db1: LayoutTensor[dtype, Layout(b11)],
+    db1: LayoutTensor[dtype, Layout(1)],
     dw2: LayoutTensor[dtype, w2l],
-    db2: LayoutTensor[dtype, Layout(b12)],
+    db2: LayoutTensor[dtype, Layout(1)],
     # alpha: Scalar[dtype],
 ) raises -> (
     LayoutTensor[dtype, w1l, MutableAnyOrigin],
@@ -732,3 +760,58 @@ fn update_parameters[
     w2f = sub(ctx, w2, mul(ctx, dw2, alpha))
     b2f = sub(ctx, b2, mul(ctx, db2, alpha))
     return w1f, b1f, w2f, b2f
+
+
+fn get_predictions[
+    dtype: DType, r: Int, c: Int
+](
+    ctx: DeviceContext, t: LayoutTensor[dtype, Layout(r, c)]
+) raises -> LayoutTensor[dtype, Layout(c), MutableAnyOrigin]:
+    return argmax_a0(ctx, t)
+
+
+fn print_accuracy[
+    dtype: DType, size: Int
+](
+    ctx: DeviceContext,
+    t1: LayoutTensor[dtype, Layout(size)],
+    t2: LayoutTensor[dtype, Layout(size)],
+) raises:
+    _, o = enqueue_create_matrix[
+        layout = Layout(size, 1), dtype = DType.uint32
+    ](ctx)
+
+    fn _compare(t1: __type_of(t1), t2: __type_of(t2), out: __type_of(o)):
+        i = block_idx.x
+        eql = t1[i][0] == t2[i][0]
+        out[i, 0] = eql.cast[DType.uint32]()
+
+    ctx.enqueue_function[_compare](t1, t2, o, grid_dim=size, block_dim=1)
+
+    fn print_acc(out: __type_of(o)):
+        shared = stack_allocation[
+            32, DType.uint32, address_space = AddressSpace.SHARED
+        ]()
+        shared.store(SIMD[DType.uint32, 32](0))
+
+        i = thread_idx.x
+
+        for shft in range(size // 1024):
+            ii = shft * 1024 + i
+            eql = 0 if ii >= size else out[ii, 0][0]
+            sum = warp.sum(eql)
+            shared[i] += sum
+
+        barrier()
+        if i == 0:
+            print(shared.load[width=32]().reduce_add())
+
+    ctx.enqueue_function[print_acc](o, grid_dim=1, block_dim=1024)
+    ctx.synchronize()
+
+    # host_buff = ctx.enqueue_create_host_buffer[dtype](1)
+    # host_t = LayoutTensor[dtype, Layout(1)](host_buff)
+    # ctx.synchronize()
+    # host_t.copy_from(out_t)
+    # return host_buff[0] / size
+    # return 0
