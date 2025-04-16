@@ -53,10 +53,11 @@ fn main() raises:
     alias w1_layout = Layout(10, img_pixels)
     alias max_y = 9
     alias ldim = max_y + 1
+
     _, w1 = enqueue_create_matrix[Layout(ldim, img_pixels), dtype, True](gpu)
-    _, b1 = enqueue_create_matrix[size=ldim, dtype=dtype, randomize=True](gpu)
+    _, b1 = enqueue_create_matrix[Layout(ldim), dtype, randomize=True](gpu)
     _, w2 = enqueue_create_matrix[Layout(ldim, ldim), dtype, True](gpu)
-    _, b2 = enqueue_create_matrix[size=ldim, dtype=dtype, randomize=True](gpu)
+    _, b2 = enqueue_create_matrix[Layout(ldim), dtype, randomize=True](gpu)
 
     print("load train to gpu")
     xb, x = enqueue_create_matrix[Layout(img_pixels, train_size), dtype](gpu)
@@ -65,7 +66,7 @@ fn main() raises:
     yb, y = enqueue_create_matrix[Layout(train_size), dtype](gpu)
     enqueue_create_labels(gpu, yb, y, images)
 
-    # This should match to the max_y + 1 == 10 -> the dimention
+    # This should match to the max_y + 1 == 10 -> ldim -> the dimention
     hot_y = one_hot_y[max_y=9](gpu, y)
 
     alias iterations = 100

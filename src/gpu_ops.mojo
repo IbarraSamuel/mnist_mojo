@@ -171,7 +171,11 @@ fn dot_large[
             result_i = z if ii >= z_dim else t1[x, ii] * t2[ii, y]
             result = warp.sum(result_i)
 
-            shared[i // warps] += result[0]  # Save in shared block memory
+            # so, for each 32, we use the final warp result, to store it into
+            # shared memory at desired location
+            if i % warps == 0:
+                shared[i // warps] += result[0]
+            # shared[i // warps] += result[0]  # Save in shared block memory
 
         barrier()
 
@@ -787,31 +791,41 @@ fn print_accuracy[
         out[i, 0] = eql.cast[DType.uint32]()
 
     ctx.enqueue_function[_compare](t1, t2, o, grid_dim=size, block_dim=1)
+    alias iterations = size // 1024 + 1 if size % 1024 > 0 else 0
 
-    fn print_acc(out: __type_of(o)):
-        shared = stack_allocation[
-            32, DType.uint32, address_space = AddressSpace.SHARED
-        ]()
-        shared.store(SIMD[DType.uint32, 32](0))
+    f_buff = ctx.enqueue_create_host_buffer[DType.uint32](1)
+    f = LayoutTensor[DType.uint32, Layout(1)](f_buff)
 
-        i = thread_idx.x
+    # fn calc_sum(out: __type_of(o), f: __type_of(f)):
+    #     shared = stack_allocation[
+    #         32, DType.uint32, address_space = AddressSpace.SHARED
+    #     ]()
+    #     shared.store(SIMD[DType.uint32, 32](0))
 
-        for shft in range(size // 1024):
-            ii = shft * 1024 + i
-            eql = 0 if ii >= size else out[ii, 0][0]
-            sum = warp.sum(eql)
-            shared[i] += sum
+    #     i = thread_idx.x
 
-        barrier()
-        if i == 0:
-            print(shared.load[width=32]().reduce_add())
+    #     for shft in range(iterations):
+    #         ii = shft * 1024 + i
 
-    ctx.enqueue_function[print_acc](o, grid_dim=1, block_dim=1024)
+    #         eql = 0 if ii >= size else out[ii, 0][0]
+
+    #         sum = warp.sum(eql)
+    #         if i % 32 == 0:
+    #             shared[i // 32] += sum
+
+    #     barrier()
+    #     if i == 0:
+    #         v = shared.load[width=32]().reduce_add()
+    #         f[0] = v.cast[dtype]()
+
+    # ctx.enqueue_function[calc_sum](o, f, grid_dim=1, block_dim=1024)
+    f2 = matrix_reduce[warp_op = warp.sum, simd_op = SIMD.reduce_add](ctx, o)
+
+    fn _gpu_to_host(gpu: __type_of(f2), host: __type_of(f)):
+        host[0] = gpu[0]
+
+    ctx.enqueue_function[_gpu_to_host](f2, f, block_dim=1, grid_dim=1)
     ctx.synchronize()
-
-    # host_buff = ctx.enqueue_create_host_buffer[dtype](1)
-    # host_t = LayoutTensor[dtype, Layout(1)](host_buff)
-    # ctx.synchronize()
-    # host_t.copy_from(out_t)
-    # return host_buff[0] / size
-    # return 0
+    # f.copy_from(f2)
+    acc = f[0].cast[dtype]() * 100 / size
+    print("Accuracy:", round(acc, 2), "%")
