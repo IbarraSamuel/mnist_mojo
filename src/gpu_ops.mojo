@@ -1,5 +1,6 @@
 from gpu.host import DeviceContext, DeviceBuffer
-from gpu import warp, barrier, thread_idx, block_idx
+from gpu import warp, barrier
+from gpu.id import thread_idx, block_idx, block_dim, grid_dim
 from gpu.memory import AddressSpace
 
 from layout import Layout as LY
@@ -22,71 +23,88 @@ from math import e
 
 fn matrix_reduce[
     dtype: DType,
-    ly: LY, //,
-    warp_op: fn[dt: DType, w: Int, //] (SIMD[dt, w]) -> SIMD[dt, w],
-    simd_op: fn[d: DType, s: Int] (SIMD[d, s]) -> SIMD[d, 1],
+    rows: Int,
+    cols: Int, //,
+    reduce_method: StringLiteral,
 ](
     ctx: DeviceContext,
-    ti: LayoutTensor[dtype, ly],
-) raises -> LayoutTensor[
-    dtype, Layout(1), MutableAnyOrigin
-]:
-    alias rows = ti.shape[0]()
-    alias cols = ti.shape[1]()
+    ti: LayoutTensor[dtype, Layout(rows, cols)],
+) raises -> LayoutTensor[dtype, Layout(1), MutableAnyOrigin]:
+    _, out_1 = reduce_zero_axis[reduce_method](ctx, ti)
+    rs = out_1.reshape[Layout(1, cols)]()
+    out_T = rebind[LayoutTensor[dtype, Layout(cols, 1), MutableAnyOrigin]](
+        rs.transpose()
+    )
+    _, out = reduce_zero_axis[reduce_method](ctx, out_T)
+    return out
 
-    _, out_t = enqueue_create_matrix[size=1, dtype=dtype](ctx)
 
-    fn all_reduce(
-        rd: Int,
-        cd: Int,
-        t: __type_of(ti),
-        final: __type_of(out_t),
-    ):
-        shared = stack_allocation[
-            32, dtype, address_space = AddressSpace.SHARED
-        ]()
+# fn matrix_reduce[
+#     dtype: DType,
+#     ly: LY, //,
+#     warp_op: fn[dt: DType, w: Int, //] (SIMD[dt, w]) -> SIMD[dt, w],
+#     simd_op: fn[d: DType, s: Int] (SIMD[d, s]) -> SIMD[d, 1],
+# ](
+#     ctx: DeviceContext,
+#     owned ti: LayoutTensor[dtype, ly],
+# ) raises -> LayoutTensor[dtype, Layout(1), MutableAnyOrigin]:
+#     """NOTE: It modifies the incoming value ti."""
+#     alias rows = ti.shape[0]()
+#     alias cols = ti.shape[1]()
 
-        r, c = thread_idx.x, block_idx.x
-        idx = r * cd + c
-        # Calculate row and col based on index.
-        rr, rc = idx // cols, idx % cols
+#     _, out_t = enqueue_create_matrix[size=1, dtype=dtype](ctx)
 
-        tvalue = t[rr, rc][0]
-        value = warp_op(tvalue)
-        shared[r // 32] = value
+#     fn all_reduce(
+#         rd: Int,
+#         cd: Int,
+#         t: __type_of(ti),
+#         final: __type_of(out_t),
+#     ):
+#         shared = stack_allocation[
+#             32, dtype, address_space = AddressSpace.SHARED
+#         ]()
 
-        barrier()
+#         r, c = thread_idx.x, block_idx.x
+#         idx = r * cd + c
+#         # Calculate row and col based on index.
+#         rr, rc = idx // cols, idx % cols
 
-        if thread_idx.x == 0:
-            max = simd_op(shared.load[width=32]())
-            lr, lc = c // cols, c % cols
-            t[lr, lc] = max
+#         tvalue = t.load[1](rr, rc)
+#         value = warp_op(tvalue)
+#         shared[r // 32] = value
 
-        if thread_idx.x == 0 and block_idx.x == 0 and cd == 1:
-            final[0, 0] = t[0, 0][0]
+#         barrier()
 
-    new_cols = cols
-    new_rows = rows
+#         if thread_idx.x == 0:
+#             max = simd_op(shared.load[width=32]())
+#             lr, lc = c // cols, c % cols
+#             t[lr, lc] = max
 
-    # While we have more than 1 columns, let's do row reduction, and
-    while new_cols != 1:
-        elems, new_rows = new_cols * new_rows, 1024
-        while elems % new_rows != 0:
-            new_rows -= 1
-        new_cols = elems // new_rows
+#         if thread_idx.x == 0 and block_idx.x == 0 and cd == 1:
+#             final[0, 0] = t.load[1](0, 0)
 
-        ctx.enqueue_function[all_reduce](
-            new_rows,
-            new_cols,
-            ti,
-            out_t,
-            grid_dim=new_cols,
-            block_dim=new_rows,
-        )
+#     new_cols = cols
+#     new_rows = rows
 
-        new_rows = 1
+#     # While we have more than 1 columns, let's do row reduction, and
+#     while new_cols != 1:
+#         elems, new_rows = new_cols * new_rows, 1024
+#         while elems % new_rows != 0:
+#             new_rows -= 1
+#         new_cols = elems // new_rows
 
-    return out_t
+#         ctx.enqueue_function[all_reduce](
+#             new_rows,
+#             new_cols,
+#             ti,
+#             out_t,
+#             grid_dim=new_cols,
+#             block_dim=new_rows,
+#         )
+
+#         new_rows = 1
+
+#     return out_t
 
 
 fn argmax_a0[
@@ -95,6 +113,8 @@ fn argmax_a0[
     ctx: DeviceContext, t: LayoutTensor[dtype, Layout(rows, cols)]
 ) raises -> LayoutTensor[dtype, Layout(cols), MutableAnyOrigin]:
     _, out = enqueue_create_matrix[Layout(cols), dtype](ctx)
+
+    constrained[rows <= 1024, "We cannot use more than 1024 rows"]()
 
     fn reduce_a0(t: __type_of(t), out: __type_of(out)):
         r, c = thread_idx.x, block_idx.x
@@ -152,14 +172,14 @@ fn dot_large[
     repeat the work to finalize the z_dim.
     If this number is one, then we should recalculate the block_dim
     """
-    alias warps = 32  # warps that could be used in a single block execution.
+    # alias warps = 32  # warps that could be used in a single block execution.
 
     fn _calc_pixel(t1: __type_of(t1), t2: __type_of(t2), o: __type_of(out)):
         # Each time a warp finishes, we can store it's result here.
         shared = stack_allocation[
-            warps, dtype, address_space = AddressSpace.SHARED
+            32, dtype, address_space = AddressSpace.SHARED
         ]()
-        shared.store(0, SIMD[dtype, warps]())
+        shared.store(0, SIMD[dtype, 32]())
         x, y, i = block_idx.x, block_idx.y, thread_idx.x
 
         z = Scalar[dtype]()
@@ -173,8 +193,8 @@ fn dot_large[
 
             # so, for each 32, we use the final warp result, to store it into
             # shared memory at desired location
-            if i % warps == 0:
-                shared[i // warps] += result[0]
+            if i % 32 == 0:
+                shared[i // 32] += result[0]
             # shared[i // warps] += result[0]  # Save in shared block memory
 
         barrier()
@@ -247,6 +267,7 @@ fn dot[
         return dot_large(ctx, t1, t2)
 
     alias warps = y // 32 + (1 if y % 32 > 0 else 0)
+    alias load_size = next_power_of_two(warps)
 
     fn dot_gpu(
         t1: __type_of(t1),
@@ -260,15 +281,17 @@ fn dot[
         t1x, t1y, t2y = block_idx.x, thread_idx.x, block_idx.y
 
         mulval = t1[t1x, t1y] * t2[t1y, t2y]
-        shared[t1y // 32] = warp.sum(mulval)[0]
+
+        # if t1y % 32 == 0:
+        shared[t1y // 32] = warp.sum(mulval[0])
 
         barrier()
 
         if t1y == 0:
             # constrained[dim1 == 1, "dim should be 1"]()
             to[t1x, t2y] = (
-                shared.load[width = next_power_of_two(warps)]()
-                .shift_left[next_power_of_two(warps) - warps]()
+                shared.load[width=load_size]()
+                .shift_left[load_size - warps]()
                 .reduce_add()
             )
 
@@ -476,40 +499,41 @@ fn div[
 
 fn relu[
     dtype: DType,
-    ly1: LY,
+    rows: Int,
+    cols: Int,
 ](
     ctx: DeviceContext,
-    ti: LayoutTensor[dtype, ly1],
-) raises -> LayoutTensor[
-    dtype, ti.layout, MutableAnyOrigin
-]:
-    alias x = ti.shape[0]()
-    alias y = ti.shape[1]()
-
+    ti: LayoutTensor[dtype, Layout(rows, cols)],
+) raises -> LayoutTensor[dtype, Layout(rows, cols), MutableAnyOrigin]:
     _tob, to = enqueue_create_matrix(ctx, like=ti)
 
     fn relu_gpu(ti: __type_of(ti), to: __type_of(to)):
         xi, yi = thread_idx.x, block_idx.x
         to[xi, yi] = max(ti[xi, yi], 0)
 
-    ctx.enqueue_function[relu_gpu](ti, to, grid_dim=y, block_dim=x)
+    ctx.enqueue_function[relu_gpu](ti, to, grid_dim=cols, block_dim=rows)
 
     return to
 
 
-fn sum_zero_axis[
+fn reduce_zero_axis[
+    reduce_method: StringLiteral[_],
+    # warp_op: fn[dt: DType, w: Int, //] (SIMD[dt, w]) -> SIMD[dt, w],
+    # simd_op: fn[d: DType, s: Int] (SIMD[d, s]) -> SIMD[d, 1],
     dtype: DType,
-    layout: LY,
+    rows: Int,
+    cols: Int,
 ](
     ctx: DeviceContext,
-    ti: LayoutTensor[dtype, layout],
+    ti: LayoutTensor[dtype, Layout(rows, cols)],
 ) raises -> (
     DeviceBuffer[dtype],
-    LayoutTensor[dtype, Layout(ti.shape[1]()), MutableAnyOrigin],
+    LayoutTensor[dtype, Layout(cols), MutableAnyOrigin],
 ):
-    alias rows = ti.shape[0]()
-    alias cols = ti.shape[1]()
-    alias warps = rows // 32 + (1 if rows % 32 > 0 else 0)
+    # alias rows = ti.shape[0]()
+    # alias cols = ti.shape[1]()
+    alias iters = rows // 1024 + (1 if rows % 1024 > 0 else 0)
+    # alias warps = rows // 32 + (1 if rows % 32 > 0 else 0)
     out_buff, out_matrix = enqueue_create_matrix[size=cols, dtype=dtype](ctx)
 
     fn sum_zero_axis_gpu(
@@ -517,23 +541,43 @@ fn sum_zero_axis[
         out: __type_of(out_matrix),
     ):
         shared = stack_allocation[
-            warps, Scalar[dtype], address_space = AddressSpace.SHARED
+            32, Scalar[dtype], address_space = AddressSpace.SHARED
         ]()
 
         r, c = thread_idx.x, block_idx.x
-        th_value = tensor.load[1](r, c)
-        value = warp.sum(th_value)
-        shared[r // 32] = value
+        for i in range(iters):
+            ri = r + 1024 * i
+            th_value = 0 if ri >= rows else tensor.load[1](ri, c)
+
+            @parameter
+            if reduce_method == "max":
+                value = warp.max(th_value)
+            else:
+                value = warp.sum(th_value)
+
+            if r % 32 == 0:
+
+                @parameter
+                if reduce_method == "max":
+                    shared[r // 32] = max(shared[r // 32], value)
+                else:
+                    shared[r // 32] += value
 
         barrier()
 
         if thread_idx.x == 0:
-            out[c] = shared.load[
-                width = next_power_of_two(warps)
-            ]().reduce_add()
+
+            @parameter
+            if reduce_method == "max":
+                out[c] = shared.load[width=32]().reduce_max()
+            else:
+                out[c] = shared.load[width=32]().reduce_add()
 
     ctx.enqueue_function[sum_zero_axis_gpu](
-        ti, out_matrix, grid_dim=cols, block_dim=1
+        ti,
+        out_matrix,
+        grid_dim=cols,
+        block_dim=min(1024, rows),
     )
 
     return out_buff, out_matrix
@@ -541,20 +585,19 @@ fn sum_zero_axis[
 
 fn softmax[
     dtype: DType,
-    ly: LY,
+    rows: Int,
+    cols: Int,
 ](
     ctx: DeviceContext,
-    ti: LayoutTensor[dtype, ly],
-) raises -> LayoutTensor[
-    dtype, ly, MutableAnyOrigin
-]:
-    alias rows = ti.shape[0]()
-    alias cols = ti.shape[1]()
+    ti: LayoutTensor[dtype, Layout(rows, cols)],
+) raises -> LayoutTensor[dtype, Layout(rows, cols), MutableAnyOrigin]:
+    # alias rows = ti.shape[0]()
+    # alias cols = ti.shape[1]()
 
     _tob, to = enqueue_create_matrix(ctx, like=ti)
 
     # CALC THE MAX VALUE IN ALL THE BUFFER
-    max_v = matrix_reduce[warp.max, SIMD.reduce_max](ctx, ti)
+    max_v = matrix_reduce["max"](ctx, ti)
 
     # Do the exponential calculation
     fn _exp(ti: __type_of(to), max: __type_of(max_v), to: __type_of(to)):
@@ -564,7 +607,7 @@ fn softmax[
     ctx.enqueue_function[_exp](ti, max_v, to, grid_dim=cols, block_dim=rows)
 
     # Calculate the sum for each column. # TODO: Test it, since it's using load.
-    _max_buff, sum_t = sum_zero_axis(ctx, to)
+    _max_buff, sum_t = reduce_zero_axis["sum"](ctx, to)
 
     # Divide the exp by the sum
     fn _div(to: __type_of(to), sum_t: __type_of(sum_t)):
@@ -607,58 +650,11 @@ fn forward_propagation[
     return z1, a1, z2, a2
 
 
-# fn forward_propagation[
-#     dtype: DType
-# ](
-#     ctx: DeviceContext,
-#     x: LayoutTensor[dtype],
-#     w1: LayoutTensor[dtype],
-#     b1: LayoutTensor[dtype],
-#     w2: LayoutTensor[dtype],
-#     b2: LayoutTensor[dtype],
-# ) raises -> (
-#     LayoutTensor[dtype, Layout(w1.shape[0](), x.shape[1]()), MutableAnyOrigin],
-#     LayoutTensor[dtype, Layout(w1.shape[0](), x.shape[1]()), MutableAnyOrigin],
-#     LayoutTensor[dtype, Layout(w2.shape[0](), x.shape[1]()), MutableAnyOrigin],
-#     LayoutTensor[dtype, Layout(w2.shape[0](), x.shape[1]()), MutableAnyOrigin],
-# ):
-#     alias r: Int = x.shape[0]()
-#     alias c: Int = x.shape[1]()
-#     alias a: Int = w1.shape[0]()
-#     alias b: Int = w2.shape[0]()
-
-#     constrained[w1.shape[1]() == r]()
-#     constrained[b1.shape[0]() == a]()
-#     constrained[b1.shape[1]() == 1]()
-#     constrained[w2.shape[1]() == a]()
-#     constrained[b2.shape[0]() == b]()
-#     constrained[b2.shape[1]() == 1]()
-
-#     # The problem is in the dot product.
-#     _d1 = dot(ctx, w1, x)
-
-#     z1 = add(ctx, _d1, b1)
-
-#     a1 = relu(ctx, z1)
-
-#     _d2 = rebind[LayoutTensor[dtype, Layout(b, c), MutableAnyOrigin]](
-#         dot(ctx, w2, a1)
-#     )
-#     z2 = add(ctx, _d2, b2)
-
-#     a2 = softmax(ctx, z2)
-
-#     return z1, a1, z2, a2
-
-
 fn der_relu[
-    dtype: DType,
-    ly: LY,
-](ctx: DeviceContext, t: LayoutTensor[dtype, ly]) raises -> LayoutTensor[
-    dtype, t.layout, MutableAnyOrigin
-]:
-    alias rows = t.shape[0]()
-    alias cols = t.shape[1]()
+    dtype: DType, rows: Int, cols: Int
+](
+    ctx: DeviceContext, t: LayoutTensor[dtype, Layout(rows, cols)]
+) raises -> LayoutTensor[dtype, Layout(rows, cols), MutableAnyOrigin]:
     _, out = enqueue_create_matrix(ctx, like=t)
 
     fn is_positive(t: __type_of(t), o: __type_of(out)):
@@ -718,7 +714,7 @@ fn backward_propagation[
     dw2 = mul(ctx, _dw2, mi)
 
     # dz1
-    sum_dz2 = matrix_reduce[warp.sum, SIMD.reduce_add](ctx, dz2)
+    sum_dz2 = matrix_reduce["sum"](ctx, dz2)
     db2 = mul(ctx, sum_dz2, mi)
     alias W2T = LayoutTensor[a1.dtype, Layout(w1r, w2r), MutableAnyOrigin]
     w2t = rebind[W2T](w2.transpose())
@@ -735,7 +731,7 @@ fn backward_propagation[
     dw1 = mul(ctx, _dw1, mi)
 
     # # db1
-    sum_dz1 = matrix_reduce[warp.sum, SIMD.reduce_add](ctx, dz1)
+    sum_dz1 = matrix_reduce["sum"](ctx, dz1)
     db1 = mul(ctx, sum_dz1, mi)
     return dw1, db1, dw2, db2
 
@@ -781,51 +777,24 @@ fn print_accuracy[
     t1: LayoutTensor[dtype, Layout(size)],
     t2: LayoutTensor[dtype, Layout(size)],
 ) raises:
-    _, o = enqueue_create_matrix[
-        layout = Layout(size, 1), dtype = DType.uint32
-    ](ctx)
+    _, o = enqueue_create_matrix[layout = Layout(size, 1), dtype=dtype](ctx)
 
     fn _compare(t1: __type_of(t1), t2: __type_of(t2), out: __type_of(o)):
         i = block_idx.x
         eql = t1[i][0] == t2[i][0]
-        out[i, 0] = eql.cast[DType.uint32]()
+        out[i, 0] = eql.cast[dtype]()
 
     ctx.enqueue_function[_compare](t1, t2, o, grid_dim=size, block_dim=1)
     alias iterations = size // 1024 + 1 if size % 1024 > 0 else 0
 
-    f_buff = ctx.enqueue_create_host_buffer[DType.uint32](1)
-    f = LayoutTensor[DType.uint32, Layout(1)](f_buff)
-
-    # fn calc_sum(out: __type_of(o), f: __type_of(f)):
-    #     shared = stack_allocation[
-    #         32, DType.uint32, address_space = AddressSpace.SHARED
-    #     ]()
-    #     shared.store(SIMD[DType.uint32, 32](0))
-
-    #     i = thread_idx.x
-
-    #     for shft in range(iterations):
-    #         ii = shft * 1024 + i
-
-    #         eql = 0 if ii >= size else out[ii, 0][0]
-
-    #         sum = warp.sum(eql)
-    #         if i % 32 == 0:
-    #             shared[i // 32] += sum
-
-    #     barrier()
-    #     if i == 0:
-    #         v = shared.load[width=32]().reduce_add()
-    #         f[0] = v.cast[dtype]()
-
-    # ctx.enqueue_function[calc_sum](o, f, grid_dim=1, block_dim=1024)
-    f2 = matrix_reduce[warp_op = warp.sum, simd_op = SIMD.reduce_add](ctx, o)
+    f_buff = ctx.enqueue_create_host_buffer[dtype](1)
+    f = LayoutTensor[dtype, Layout(1)](f_buff)
+    _, f2 = reduce_zero_axis["sum"](ctx, o)
 
     fn _gpu_to_host(gpu: __type_of(f2), host: __type_of(f)):
         host[0] = gpu[0]
 
     ctx.enqueue_function[_gpu_to_host](f2, f, block_dim=1, grid_dim=1)
     ctx.synchronize()
-    # f.copy_from(f2)
-    acc = f[0].cast[dtype]() * 100 / size
+    acc = f_buff[0] * 100 / size
     print("Accuracy:", round(acc, 2), "%")
