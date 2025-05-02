@@ -104,11 +104,11 @@ fn main() raises:
 
     buff = ctx.enqueue_create_buffer[dtype](rows_1 * cols_1)
     buff.enqueue_copy_from(host_buff.create_sub_buffer[dtype](0, len(buff)))
-    t1 = LayoutTensor[dtype, Layout.row_major(rows_1, cols_1)](buff)
+    t1 = LayoutTensor[dtype, Layout(IntTuple(rows_1, cols_1))](buff)
 
     buff2 = ctx.enqueue_create_buffer[dtype](rows_2 * cols_2)
     buff2.enqueue_copy_from(host_buff.create_sub_buffer[dtype](0, len(buff2)))
-    t2 = LayoutTensor[dtype, Layout.row_major(rows_2, cols_2)](buff2)
+    t2 = LayoutTensor[dtype, Layout(IntTuple(rows_2, cols_2))](buff2)
 
     res2 = dot_large(ctx, t1, t2)
     res1 = dot(ctx, t1, t2)
