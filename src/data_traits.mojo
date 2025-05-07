@@ -1,7 +1,7 @@
 from bit import next_power_of_two
 
 
-trait HasData(CollectionElement):
+trait HasData:
     alias dtype: DType
     alias size: Int
 
@@ -9,10 +9,9 @@ trait HasData(CollectionElement):
         ...
 
 
-trait HasLabel(CollectionElement):
+trait HasLabel:
     fn get_label(self) -> Int:
         ...
 
 
-trait Loadable(HasData, HasLabel):
-    ...
+alias Loadable = HasData & HasLabel

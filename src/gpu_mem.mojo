@@ -147,7 +147,7 @@ fn enqueue_create_matrix[
 
 
 fn enqueue_images_to_gpu_matrix[
-    img_type: HasData,
+    img_type: HasData & Copyable & Movable,
     layout: LY,
 ](
     ctx: DeviceContext,
@@ -179,7 +179,7 @@ fn enqueue_images_to_gpu_matrix[
 
 
 fn enqueue_create_labels[
-    img_type: HasLabel,
+    img_type: HasLabel & Copyable & Movable,
     ly: LY,
 ](
     ctx: DeviceContext,

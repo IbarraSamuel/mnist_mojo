@@ -18,7 +18,7 @@ alias TrainImage = TrainData[type = DType.uint8]
 
 
 struct TrainData[rows: Int, cols: Int, type: DType](
-    Writable, HasData, HasLabel
+    Writable, HasData, HasLabel, Copyable, Movable
 ):
     alias dtype = type
     alias size = cols * rows
