@@ -112,18 +112,20 @@ fn argmax_a0[
 ](
     ctx: DeviceContext, t: LayoutTensor[dtype, Layout(rows, cols)]
 ) raises -> LayoutTensor[dtype, Layout(cols), MutableAnyOrigin]:
-    _, out = enqueue_create_matrix[Layout(cols), dtype](ctx)
+    _, out_tensor = enqueue_create_matrix[Layout(cols), dtype](ctx)
 
     constrained[rows <= 1024, "We cannot use more than 1024 rows"]()
 
-    fn reduce_a0(t: __type_of(t), out: __type_of(out)):
+    fn reduce_a0(t: __type_of(t), o: __type_of(out_tensor)):
         r, c = thread_idx.x, block_idx.x
         val = t[r, c]
         mx_val = warp.max(val)
-        out[c] = r if val == mx_val else out[c]
+        o[c] = r if val == mx_val else o[c]
 
-    ctx.enqueue_function[reduce_a0](t, out, grid_dim=cols, block_dim=rows)
-    return out
+    ctx.enqueue_function[reduce_a0](
+        t, out_tensor, grid_dim=cols, block_dim=rows
+    )
+    return out_tensor
 
 
 fn dot_large[
@@ -332,9 +334,9 @@ fn add[
 ) raises -> LayoutTensor[dtype, Layout(a, b), MutableAnyOrigin]:
     _, out = enqueue_create_matrix(ctx, like=t1)
 
-    fn add_gpu(a: __type_of(t1), b: __type_of(t2), out: __type_of(out)):
+    fn add_gpu(a: __type_of(t1), b: __type_of(t2), o: __type_of(out)):
         r, c = thread_idx.x, block_idx.x
-        out[r, c] = a[r, c] + b[r, c]
+        o[r, c] = a[r, c] + b[r, c]
 
     ctx.enqueue_function[add_gpu](t1, t2, out, grid_dim=b, block_dim=a)
 
@@ -406,9 +408,9 @@ fn sub[
     alias cols = t1.shape[1]()
     _, out = enqueue_create_matrix(ctx, like=t1)
 
-    fn sub_gpu(a: __type_of(t1), b: __type_of(t2), out: __type_of(out)):
+    fn sub_gpu(a: __type_of(t1), b: __type_of(t2), o: __type_of(out)):
         r, c = thread_idx.x, block_idx.x
-        out[r, c] = a[r, c] - b[r, c]
+        o[r, c] = a[r, c] - b[r, c]
 
     ctx.enqueue_function[sub_gpu](t1, t2, out, grid_dim=cols, block_dim=rows)
 
@@ -427,9 +429,9 @@ fn mul[
     alias cols = t1.shape[1]()
     _, out = enqueue_create_matrix(ctx, like=t1)
 
-    fn mul_gpu(a: __type_of(t1), b: __type_of(t2), out: __type_of(out)):
+    fn mul_gpu(a: __type_of(t1), b: __type_of(t2), o: __type_of(out)):
         r, c = thread_idx.x, block_idx.x
-        out[r, c] = a[r, c] * b[r, c]
+        o[r, c] = a[r, c] * b[r, c]
 
     ctx.enqueue_function[mul_gpu](t1, t2, out, grid_dim=cols, block_dim=rows)
 
@@ -446,9 +448,9 @@ fn mul[
     alias size = t1.shape[0]()
     _, out = enqueue_create_matrix(ctx, like=t1)
 
-    fn mul_gpu(a: __type_of(t1), b: __type_of(t2), out: __type_of(out)):
+    fn mul_gpu(a: __type_of(t1), b: __type_of(t2), o: __type_of(out)):
         i = thread_idx.x
-        out[i] = a[i] * b
+        o[i] = a[i] * b
 
     ctx.enqueue_function[mul_gpu](t1, t2, out, grid_dim=1, block_dim=1)
 
@@ -467,9 +469,9 @@ fn mul[
     alias cols = t1.shape[1]()
     _, out = enqueue_create_matrix(ctx, like=t1)
 
-    fn mul_gpu(a: __type_of(t1), b: __type_of(t2), out: __type_of(out)):
+    fn mul_gpu(a: __type_of(t1), b: __type_of(t2), o: __type_of(out)):
         r, c = thread_idx.x, block_idx.x
-        out[r, c] = a[r, c] * b
+        o[r, c] = a[r, c] * b
 
     ctx.enqueue_function[mul_gpu](t1, t2, out, grid_dim=cols, block_dim=rows)
 
@@ -488,9 +490,9 @@ fn div[
     alias cols = t1.shape[1]()
     _, out = enqueue_create_matrix(ctx, like=t1)
 
-    fn div_gpu(a: __type_of(t1), b: __type_of(t2), out: __type_of(out)):
+    fn div_gpu(a: __type_of(t1), b: __type_of(t2), o: __type_of(out)):
         r, c = thread_idx.x, block_idx.x
-        out[r, c] = a[r, c] / b[r, c]
+        o[r, c] = a[r, c] / b[r, c]
 
     ctx.enqueue_function[div_gpu](t1, t2, out, grid_dim=cols, block_dim=rows)
 
@@ -536,10 +538,7 @@ fn reduce_zero_axis[
     # alias warps = rows // 32 + (1 if rows % 32 > 0 else 0)
     out_buff, out_matrix = enqueue_create_matrix[size=cols, dtype=dtype](ctx)
 
-    fn sum_zero_axis_gpu(
-        tensor: __type_of(ti),
-        out: __type_of(out_matrix),
-    ):
+    fn sum_zero_axis_gpu(tensor: __type_of(ti), o: __type_of(out_matrix)):
         shared = stack_allocation[
             32, Scalar[dtype], address_space = AddressSpace.SHARED
         ]()
@@ -569,9 +568,9 @@ fn reduce_zero_axis[
 
             @parameter
             if reduce_method == "max":
-                out[c] = shared.load[width=32]().reduce_max()
+                o[c] = shared.load[width=32]().reduce_max()
             else:
-                out[c] = shared.load[width=32]().reduce_add()
+                o[c] = shared.load[width=32]().reduce_add()
 
     ctx.enqueue_function[sum_zero_axis_gpu](
         ti,
@@ -779,10 +778,10 @@ fn print_accuracy[
 ) raises:
     _, o = enqueue_create_matrix[layout = Layout(size, 1), dtype=dtype](ctx)
 
-    fn _compare(t1: __type_of(t1), t2: __type_of(t2), out: __type_of(o)):
+    fn _compare(t1: __type_of(t1), t2: __type_of(t2), o: __type_of(o)):
         i = block_idx.x
         eql = t1[i][0] == t2[i][0]
-        out[i, 0] = eql.cast[dtype]()
+        o[i, 0] = eql.cast[dtype]()
 
     ctx.enqueue_function[_compare](t1, t2, o, grid_dim=size, block_dim=1)
     alias iterations = size // 1024 + 1 if size % 1024 > 0 else 0
