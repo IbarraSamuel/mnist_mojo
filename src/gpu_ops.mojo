@@ -581,11 +581,12 @@ fn reduce_zero_axis[
             else:
                 o[c] = shared.load[width=32]().reduce_add()
 
-    ctx.enqueue_function[sum_zero_axis_gpu](
-        ti,
-        out_matrix,
-        grid_dim=cols,
-        block_dim=min(1024, rows),
+    # ctx.enqueue_function[sum_zero_axis_gpu](
+    #     ti, out_matrix, grid_dim=cols, block_dim=min(1024, rows)
+    # )
+
+    ctx.enqueue_function_experimental[sum_zero_axis_gpu](
+        ti, out_matrix, grid_dim=cols, block_dim=min(1024, rows)
     )
 
     return out_buff, out_matrix
