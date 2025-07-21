@@ -12,12 +12,14 @@ from memory import stack_allocation
 from gpu_mem import (
     enqueue_create_matrix,
     enqueue_create_host_buf,
+    create_buffer_from_csv,
     MAX_BLOCKS_1D,
     MAX_BLOCKS_2D,
     MAX_BLOCKS_3D,
     Layout,
 )
 
+from pathlib import Path
 from math import e
 
 
@@ -46,7 +48,7 @@ fn matrix_reduce[
 #     simd_op: fn[d: DType, s: Int] (SIMD[d, s]) -> SIMD[d, 1],
 # ](
 #     ctx: DeviceContext,
-#     owned ti: LayoutTensor[dtype, ly],
+#     var ti: LayoutTensor[dtype, ly],
 # ) raises -> LayoutTensor[dtype, Layout(1), MutableAnyOrigin]:
 #     """NOTE: It modifies the incoming value ti."""
 #     alias rows = ti.shape[0]()
@@ -109,10 +111,11 @@ fn matrix_reduce[
 
 fn argmax_a0[
     dtype: DType, rows: Int, cols: Int
-](
-    ctx: DeviceContext, t: LayoutTensor[dtype, Layout(rows, cols)]
-) raises -> LayoutTensor[dtype, Layout(cols), MutableAnyOrigin]:
-    _, out_tensor = enqueue_create_matrix[Layout(cols), dtype](ctx)
+](ctx: DeviceContext, t: LayoutTensor[dtype, Layout(rows, cols)]) raises -> (
+    DeviceBuffer[dtype],
+    LayoutTensor[dtype, Layout(cols), MutableAnyOrigin],
+):
+    buff, out_tensor = enqueue_create_matrix[Layout(cols), dtype](ctx)
 
     constrained[rows <= 1024, "We cannot use more than 1024 rows"]()
 
@@ -125,7 +128,7 @@ fn argmax_a0[
     ctx.enqueue_function[reduce_a0](
         t, out_tensor, grid_dim=cols, block_dim=rows
     )
-    return out_tensor
+    return buff, out_tensor
 
 
 fn dot_large[
@@ -308,9 +311,12 @@ fn add[
     ctx: DeviceContext,
     t1: LayoutTensor[dtype, Layout(a, b)],
     t2: LayoutTensor[dtype, Layout(a)],
-) raises -> LayoutTensor[t1.dtype, t1.layout, MutableAnyOrigin]:
+) raises -> (
+    DeviceBuffer[dtype],
+    LayoutTensor[t1.dtype, t1.layout, MutableAnyOrigin],
+):
     # Assume that t1.cols is the largest
-    _tob, to = enqueue_create_matrix(ctx, like=t1)
+    tob, to = enqueue_create_matrix(ctx, like=t1)
 
     fn add_gpu(
         t1: __type_of(t1),
@@ -322,7 +328,7 @@ fn add[
 
     ctx.enqueue_function[add_gpu](t1, t2, to, grid_dim=b, block_dim=a)
 
-    return to
+    return tob, to
 
 
 fn add[
@@ -506,8 +512,11 @@ fn relu[
 ](
     ctx: DeviceContext,
     ti: LayoutTensor[dtype, Layout(rows, cols)],
-) raises -> LayoutTensor[dtype, Layout(rows, cols), MutableAnyOrigin]:
-    _tob, to = enqueue_create_matrix(ctx, like=ti)
+) raises -> (
+    DeviceBuffer[dtype],
+    LayoutTensor[dtype, Layout(rows, cols), MutableAnyOrigin],
+):
+    tob, to = enqueue_create_matrix(ctx, like=ti)
 
     fn relu_gpu(ti: __type_of(ti), to: __type_of(to)):
         xi, yi = thread_idx.x, block_idx.x
@@ -515,7 +524,7 @@ fn relu[
 
     ctx.enqueue_function[relu_gpu](ti, to, grid_dim=cols, block_dim=rows)
 
-    return to
+    return tob, to
 
 
 fn reduce_zero_axis[
@@ -589,11 +598,14 @@ fn softmax[
 ](
     ctx: DeviceContext,
     ti: LayoutTensor[dtype, Layout(rows, cols)],
-) raises -> LayoutTensor[dtype, Layout(rows, cols), MutableAnyOrigin]:
+) raises -> (
+    DeviceBuffer[dtype],
+    LayoutTensor[dtype, Layout(rows, cols), MutableAnyOrigin],
+):
     # alias rows = ti.shape[0]()
     # alias cols = ti.shape[1]()
 
-    _tob, to = enqueue_create_matrix(ctx, like=ti)
+    tob, to = enqueue_create_matrix(ctx, like=ti)
 
     # CALC THE MAX VALUE IN ALL THE BUFFER
     max_v = matrix_reduce["max"](ctx, ti)
@@ -615,7 +627,7 @@ fn softmax[
 
     ctx.enqueue_function[_div](to, sum_t, grid_dim=cols, block_dim=rows)
 
-    return to
+    return tob, to
 
 
 fn forward_propagation[
@@ -636,15 +648,39 @@ fn forward_propagation[
     # The problem is in the dot product.
     alias D = LayoutTensor[dtype, Layout(a, c), MutableAnyOrigin]
     _d1 = rebind[D](dot(ctx, w1, x))  # Why it doesn't work automagically?
-    z1 = add(ctx, _d1, b1)
+    z1b, z1 = add(ctx, _d1, b1)
 
-    a1 = relu(ctx, z1)
+    csv = Path("Z1.csv").read_text()
+    exp = create_buffer_from_csv[dtype](ctx, csv)
+    with z1b.map_to_host() as in_host:
+        print("z1:", in_host)
+        print("z1 expected:", exp)
+
+    a1b, a1 = relu(ctx, z1)
+
+    csv = Path("A1.csv").read_text()
+    exp = create_buffer_from_csv[dtype](ctx, csv)
+    with a1b.map_to_host() as in_host:
+        print("a1:", in_host)
+        print("a1 expected:", exp)
 
     alias D2 = LayoutTensor[dtype, Layout(b, c), MutableAnyOrigin]
     _d2 = rebind[D2](dot(ctx, w2, a1))  # Why it doesn't work automagically?
-    z2 = add(ctx, _d2, b2)
+    z2b, z2 = add(ctx, _d2, b2)
 
-    a2 = softmax(ctx, z2)
+    csv = Path("Z2.csv").read_text()
+    exp = create_buffer_from_csv[dtype](ctx, csv)
+    with z2b.map_to_host() as in_host:
+        print("z2:", in_host)
+        print("z2 expected:", exp)
+
+    a2b, a2 = softmax(ctx, z2)
+
+    csv = Path("A2.csv").read_text()
+    exp = create_buffer_from_csv[dtype](ctx, csv)
+    with a2b.map_to_host() as in_host:
+        print("a2:", in_host)
+        print("a2 expected:", exp)
 
     return z1, a1, z2, a2
 
@@ -766,34 +802,32 @@ fn get_predictions[
 ](
     ctx: DeviceContext, t: LayoutTensor[dtype, Layout(r, c)]
 ) raises -> LayoutTensor[dtype, Layout(c), MutableAnyOrigin]:
-    return argmax_a0(ctx, t)
+    buff, preds = argmax_a0(ctx, t)
+    with buff.map_to_host() as b:
+        print("predictions:", b)
+    return preds
 
 
 fn print_accuracy[
     dtype: DType, size: Int
 ](
     ctx: DeviceContext,
-    t1: LayoutTensor[dtype, Layout(size)],
-    t2: LayoutTensor[dtype, Layout(size)],
+    predictions: LayoutTensor[dtype, Layout(size)],
+    expected: LayoutTensor[dtype, Layout(size)],
 ) raises:
     _, o = enqueue_create_matrix[layout = Layout(size, 1), dtype=dtype](ctx)
 
-    fn _compare(t1: __type_of(t1), t2: __type_of(t2), o: __type_of(o)):
+    fn _compare(
+        pred: __type_of(predictions), exp: __type_of(expected), o: __type_of(o)
+    ):
         i = block_idx.x
-        eql = t1[i][0] == t2[i][0]
+        eql = pred[i][0] == exp[i][0]
         o[i, 0] = eql.cast[dtype]()
 
-    ctx.enqueue_function[_compare](t1, t2, o, grid_dim=size, block_dim=1)
-    alias iterations = size // 1024 + 1 if size % 1024 > 0 else 0
+    ctx.enqueue_function[_compare](
+        predictions, expected, o, grid_dim=size, block_dim=1
+    )
+    b, _ = reduce_zero_axis["sum"](ctx, o)
 
-    f_buff = ctx.enqueue_create_host_buffer[dtype](1)
-    f = LayoutTensor[dtype, Layout(1)](f_buff)
-    _, f2 = reduce_zero_axis["sum"](ctx, o)
-
-    fn _gpu_to_host(gpu: __type_of(f2), host: __type_of(f)):
-        host[0] = gpu[0]
-
-    ctx.enqueue_function[_gpu_to_host](f2, f, block_dim=1, grid_dim=1)
-    ctx.synchronize()
-    acc = f_buff[0] * 100 / size
-    print("Accuracy:", round(acc, 2), "%")
+    with b.map_to_host() as h:
+        print("Accuracy:", h[0] / size)

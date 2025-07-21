@@ -1,10 +1,12 @@
 from image import TrainImage
+from pathlib import Path
 from load_file import read_image_file
 from gpu_mem import (
     get_gpu,
     enqueue_create_matrix,
     enqueue_create_labels,
     enqueue_images_to_gpu_matrix,
+    enqueue_create_matrix_from_csv,
     Layout,
 )
 from gpu_ops import (
@@ -42,6 +44,8 @@ fn main() raises:
         cols=img_cols,
         dtype=dtype,
     ]()
+    w1_csv = Path("w1.csv").read_text()
+    w2_csv = Path("w2.csv").read_text()
 
     print("Files readed!")
     # for img in range(len(images)):
@@ -54,14 +58,29 @@ fn main() raises:
     alias max_y = 9
     alias ldim = max_y + 1
 
-    _, w1 = enqueue_create_matrix[Layout(ldim, img_pixels), dtype, True](gpu)
+    # _, w1 = enqueue_create_matrix[
+    #     Layout(ldim, img_pixels),
+    #     dtype,
+    #     randomize=True,
+    # ](gpu)
     _, b1 = enqueue_create_matrix[Layout(ldim), dtype, randomize=True](gpu)
-    _, w2 = enqueue_create_matrix[Layout(ldim, ldim), dtype, True](gpu)
+    _, w1 = enqueue_create_matrix_from_csv[dtype, Layout(ldim, img_pixels)](
+        gpu, w1_csv
+    )
+    # _, w2 = enqueue_create_matrix[
+    #     Layout(ldim, ldim),
+    #     dtype,
+    #     randomize=True,
+    # ](gpu)
     _, b2 = enqueue_create_matrix[Layout(ldim), dtype, randomize=True](gpu)
+    _, w2 = enqueue_create_matrix_from_csv[dtype, Layout(ldim, ldim)](
+        gpu, w2_csv
+    )
 
+    print("Load train data.")
     print("load train to gpu")
     xb, x = enqueue_create_matrix[Layout(img_pixels, train_size), dtype](gpu)
-    enqueue_images_to_gpu_matrix(gpu, xb, x, images)
+    enqueue_images_to_gpu_matrix[layout = x.layout](gpu, xb, x, images)
 
     yb, y = enqueue_create_matrix[Layout(train_size), dtype](gpu)
     enqueue_create_labels(gpu, yb, y, images)
@@ -69,7 +88,7 @@ fn main() raises:
     # This should match to the max_y + 1 == 10 -> ldim -> the dimention
     hot_y = one_hot_y[max_y=9](gpu, y)
 
-    alias iterations = 100
+    alias iterations = 1
     alias alpha = Scalar[dtype](0.001)
 
     for i in range(iterations):

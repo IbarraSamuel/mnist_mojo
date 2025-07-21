@@ -7,6 +7,8 @@ from builtin.builtin_slice import slice
 from os import abort
 from algorithm import sync_parallelize
 from memory import UnsafePointer, memcpy
+from pathlib import Path
+
 import random
 from image import print_grayscale
 from math import sqrt
@@ -21,14 +23,17 @@ alias MAX_BLOCKS_3D = MAX_BLOCKS_1D ** (1 / 3)
 """The max for 3D blocks."""
 
 
+@always_inline
 fn Layout(x: Int, y: Int, z: Int) -> LY:
     return LY(IntTuple(x, y, z))
 
 
+@always_inline
 fn Layout(x: Int, y: Int) -> LY:
     return LY(IntTuple(x, y))
 
 
+@always_inline
 fn Layout(x: Int) -> LY:
     return LY(IntTuple(x))
 
@@ -91,7 +96,7 @@ fn enqueue_buf_to_tensor(
 
 fn enqueue_randomize(ctx: DeviceContext, gpu_buffer: DeviceBuffer) raises:
     size = len(gpu_buffer)
-    host_buffer = ctx.enqueue_create_host_buffer[gpu_buffer.type](size)
+    host_buffer = ctx.enqueue_create_host_buffer[gpu_buffer.dtype](size)
     random.rand(host_buffer.unsafe_ptr(), size, min=-0.1, max=0.1)
     gpu_buffer.enqueue_copy_from(host_buffer)
 
@@ -99,6 +104,7 @@ fn enqueue_randomize(ctx: DeviceContext, gpu_buffer: DeviceBuffer) raises:
 fn enqueue_create_matrix[
     layout: LY,
     dtype: DType,
+    *,
     randomize: Bool = False,
 ](ctx: DeviceContext) raises -> (
     DeviceBuffer[dtype],
@@ -125,7 +131,7 @@ fn enqueue_create_matrix[
     DeviceBuffer[dtype],
     LayoutTensor[dtype, Layout(size), MutableAnyOrigin],
 ):
-    return enqueue_create_matrix[Layout(size), dtype, randomize](ctx)
+    return enqueue_create_matrix[Layout(size), dtype, randomize=randomize](ctx)
 
 
 fn enqueue_create_matrix[
@@ -147,8 +153,7 @@ fn enqueue_create_matrix[
 
 
 fn enqueue_images_to_gpu_matrix[
-    img_type: HasData & Copyable & Movable,
-    layout: LY,
+    img_type: HasData & Copyable & Movable, layout: LY
 ](
     ctx: DeviceContext,
     buff: DeviceBuffer[img_type.dtype],
@@ -159,7 +164,9 @@ fn enqueue_images_to_gpu_matrix[
         ctx, len(buff)  # Doesn't matter right now
     )
     local_buff = local_buff.enqueue_fill(0)
-    local_tensor = __type_of(tensor)(local_buff)
+    local_tensor = LayoutTensor[img_type.dtype, layout, MutableAnyOrigin](
+        local_buff
+    )
 
     alias pixels: Int = tensor.shape[0]()
     alias images_: Int = tensor.shape[1]()
@@ -174,6 +181,7 @@ fn enqueue_images_to_gpu_matrix[
         for image in range(images_):
             control = Int(images[image].get_data()[pixel])
             local_tensor[pixel, image] = control
+    ctx.synchronize()
 
     buff.enqueue_copy_from(local_buff)
 
@@ -184,10 +192,10 @@ fn enqueue_create_labels[
 ](
     ctx: DeviceContext,
     buff: DeviceBuffer,
-    tensor: LayoutTensor[buff.type, ly],
+    tensor: LayoutTensor[buff.dtype, ly],
     images: List[img_type],
 ) raises:
-    alias dtype = buff.type
+    alias dtype = buff.dtype
     local_buff = enqueue_create_host_buf[dtype](ctx, len(buff))
     local_buff = local_buff.enqueue_fill(0)
     local_tensor = LayoutTensor[dtype, tensor.layout](local_buff)
@@ -200,5 +208,55 @@ fn enqueue_create_labels[
     ctx.synchronize()
     for i in range(len(images)):
         local_tensor[i] = images[i].get_label()
+    ctx.synchronize()
+
+    print("Expected results:", local_buff)
 
     buff.enqueue_copy_from(local_buff)
+
+
+fn enqueue_create_matrix_from_csv[
+    dtype: DType, ly: LY
+](ctx: DeviceContext, csv: String) raises -> (
+    DeviceBuffer[dtype],
+    LayoutTensor[dtype, ly, MutableAnyOrigin],
+):
+    local_buff = enqueue_create_host_buf[dtype](
+        ctx, ly.shape[0].value() * ly.shape[1].value()
+    )
+    lines = csv.split("\n")
+    ctx.synchronize()
+    for li in range(len(lines)):
+        ref line = lines.unsafe_get(li)
+        if line == "":
+            break
+        ref nums = line.split(",")
+        for ni in range(len(nums)):
+            n = Scalar[dtype](nums.unsafe_get(ni))
+            local_buff[li * len(nums) + ni] = n.cast[dtype]()
+    ctx.synchronize()
+
+    dev, mtx = enqueue_create_matrix[ly, dtype, randomize=False](ctx)
+    dev.enqueue_copy_from(local_buff)
+
+    return dev, mtx
+
+
+fn create_buffer_from_csv[
+    dtype: DType
+](ctx: DeviceContext, csv: String) raises -> HostBuffer[dtype]:
+    commas = csv.count(",") + +csv.count("\n") + 1
+    buff = ctx.enqueue_create_host_buffer[dtype](commas)
+    init = 0
+    idx = 0
+    ctx.synchronize()
+    while True:
+        end = min(csv.find(",", init), csv.find("\n", init))
+        if end == -1:
+            break
+        buff[idx] = Float32(csv[init:end]).cast[dtype]()
+        init = end + 1
+        idx += 1
+    ctx.synchronize()
+
+    return buff

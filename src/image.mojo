@@ -7,7 +7,7 @@ alias extended_chars = " .'`^\",:;Il!i><~+_-?][}{1)(|/tfjrxnuvczXYUJCLQ0OZmwqpdb
 
 fn print_grayscale[
     W: Writer, dtype: DType, //, charset: String = chars
-](owned intensity: Scalar[dtype], mut w: W):
+](var intensity: Scalar[dtype], mut w: W):
     alias charset_size = len(charset)
     pct = intensity.cast[DType.float32]() / 255.0
     index = (pct * (charset_size - 1)).cast[DType.uint8]()
@@ -51,7 +51,7 @@ struct TrainData[rows: Int, cols: Int, type: DType](
         self.label = other.label
         self.data = other.data
 
-    fn __moveinit__(out self, owned other: Self):
+    fn __moveinit__(out self, var other: Self):
         self.label = other.label
         self.data = other.data
 

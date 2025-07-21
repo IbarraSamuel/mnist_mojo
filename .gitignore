@@ -11,3 +11,5 @@
 # Train files
 digit-recognizer/
 python/
+
+*.csv

@@ -31,9 +31,9 @@ fn dot_large[
         dtype, Layout(IntTuple(x_dim, z_dim, y_dim)), MutableAnyOrigin
     ](buff)
 
-    fn dot_large_gpu(t1: __type_of(t1), t2: __type_of(t2), out: __type_of(out)):
+    fn dot_large_gpu(t1: __type_of(t1), t2: __type_of(t2), o: __type_of(out)):
         x, z, y = thread_idx.x, block_idx.x, thread_idx.y
-        out[x, z, y] = t1[x, z] * t2[z, y]
+        o[x, z, y] = t1[x, z] * t2[z, y]
 
     ctx.enqueue_function[dot_large_gpu](
         t1, t2, out, grid_dim=z_dim, block_dim=(x_dim, y_dim)
@@ -55,7 +55,7 @@ fn dot_large[
         dtype, Layout(IntTuple(x_dim, y_dim)), MutableAnyOrigin
     ](obuff)
 
-    fn reduce_with_warps(out: __type_of(out), out2: __type_of(out2)):
+    fn reduce_with_warps(o: __type_of(out), o2: __type_of(out2)):
         shared = stack_allocation[
             warps_per_v, dtype, address_space = AddressSpace.SHARED
         ]()
@@ -65,7 +65,7 @@ fn dot_large[
             # Move the thread 1024 down to calc next portion
             zb = 1024 * blk + z
             # get the value out ot the tensor
-            sval = out[x, zb, y][0]
+            sval = o[x, zb, y][0]
             # warp into a single value
             tot = warp.sum(sval)
 
@@ -80,7 +80,7 @@ fn dot_large[
                 .shift_left[wpv_2pow - warps_per_v]()
                 .reduce_add()
             )
-            out2[x, y] = final
+            o2[x, y] = final
 
     ctx.enqueue_function[reduce_with_warps](
         out, out2, grid_dim=(x_dim, y_dim), block_dim=block_dim
