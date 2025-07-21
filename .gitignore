@@ -13,3 +13,4 @@ digit-recognizer/
 python/
 
 *.csv
+.vscode/
