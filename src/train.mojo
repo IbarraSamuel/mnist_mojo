@@ -93,22 +93,15 @@ fn main() raises:
     alias alpha = Scalar[dtype](0.001)
 
     for i in range(iterations):
-        with xb.map_to_host() as in_host:
-            tot: Scalar[dtype] = 0
-            for v in in_host.as_span():
-                tot += v
-            print("x:", in_host)
-            print("tot:", tot)
-
         z1, a1, _, a2 = forward_propagation(gpu, x, w1, b1, w2, b2)
-        # dw1, db1, dw2, db2 = backward_propagation(gpu, x, z1, a1, a2, w2, hot_y)
-        # w1, b1, w2, b2 = update_parameters[alpha](
-        #     gpu, w1, b1, w2, b2, dw1, db1, dw2, db2
-        # )
+    #     # dw1, db1, dw2, db2 = backward_propagation(gpu, x, z1, a1, a2, w2, hot_y)
+    #     # w1, b1, w2, b2 = update_parameters[alpha](
+    #     #     gpu, w1, b1, w2, b2, dw1, db1, dw2, db2
+    #     # )
 
-        # if i % 10 == 0:
-        #     print("Iteration:", i)
-        #     var predictions = get_predictions(gpu, a2)
-        #     print_accuracy(gpu, predictions, y)
+    #     # if i % 10 == 0:
+    #     #     print("Iteration:", i)
+    #     #     var predictions = get_predictions(gpu, a2)
+    #     #     print_accuracy(gpu, predictions, y)
 
-    gpu.synchronize()
+    # gpu.synchronize()
