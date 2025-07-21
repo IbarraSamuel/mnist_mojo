@@ -55,9 +55,10 @@ fn main() raises:
     gpu = get_gpu()
 
     alias w1_layout = Layout(10, img_pixels)
-    alias max_y = 9
-    alias ldim = max_y + 1
+    alias ldim = w1_layout.shape[0].value()
+    alias max_y = ldim - 1
 
+    print("Load train w from python to gpu.")
     # _, w1 = enqueue_create_matrix[
     #     Layout(ldim, img_pixels),
     #     dtype,
@@ -77,8 +78,7 @@ fn main() raises:
         gpu, w2_csv
     )
 
-    print("Load train data.")
-    print("load train to gpu")
+    print("load train (images) to gpu")
     xb, x = enqueue_create_matrix[Layout(img_pixels, train_size), dtype](gpu)
     enqueue_images_to_gpu_matrix[layout = x.layout](gpu, xb, x, images)
 
@@ -91,16 +91,16 @@ fn main() raises:
     alias iterations = 1
     alias alpha = Scalar[dtype](0.001)
 
-    for i in range(iterations):
-        z1, a1, _, a2 = forward_propagation(gpu, x, w1, b1, w2, b2)
-        dw1, db1, dw2, db2 = backward_propagation(gpu, x, z1, a1, a2, w2, hot_y)
-        w1, b1, w2, b2 = update_parameters[alpha](
-            gpu, w1, b1, w2, b2, dw1, db1, dw2, db2
-        )
+    # for i in range(iterations):
+    #     z1, a1, _, a2 = forward_propagation(gpu, x, w1, b1, w2, b2)
+    #     dw1, db1, dw2, db2 = backward_propagation(gpu, x, z1, a1, a2, w2, hot_y)
+    #     w1, b1, w2, b2 = update_parameters[alpha](
+    #         gpu, w1, b1, w2, b2, dw1, db1, dw2, db2
+    #     )
 
-        if i % 10 == 0:
-            print("Iteration:", i)
-            var predictions = get_predictions(gpu, a2)
-            print_accuracy(gpu, predictions, y)
+    #     if i % 10 == 0:
+    #         print("Iteration:", i)
+    #         var predictions = get_predictions(gpu, a2)
+    #         print_accuracy(gpu, predictions, y)
 
     gpu.synchronize()

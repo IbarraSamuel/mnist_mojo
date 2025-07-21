@@ -23,12 +23,12 @@ alias MAX_BLOCKS_3D = MAX_BLOCKS_1D ** (1 / 3)
 """The max for 3D blocks."""
 
 
-@always_inline
+@always_inline("nodebug")
 fn Layout(x: Int, y: Int, z: Int) -> LY:
     return LY(IntTuple(x, y, z))
 
 
-@always_inline
+@always_inline("nodebug")
 fn Layout(x: Int, y: Int) -> LY:
     return LY(IntTuple(x, y))
 
@@ -232,8 +232,9 @@ fn enqueue_create_matrix_from_csv[
             break
         ref nums = line.split(",")
         for ni in range(len(nums)):
-            n = Scalar[dtype](nums.unsafe_get(ni))
-            local_buff[li * len(nums) + ni] = n.cast[dtype]()
+            local_buff[li * len(nums) + ni] = (
+                nums.unsafe_get(ni).__float__().cast[dtype]()
+            )
     ctx.synchronize()
 
     dev, mtx = enqueue_create_matrix[ly, dtype, randomize=False](ctx)
