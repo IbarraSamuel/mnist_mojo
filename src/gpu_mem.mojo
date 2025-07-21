@@ -210,8 +210,6 @@ fn enqueue_create_labels[
         local_tensor[i] = images[i].get_label()
     ctx.synchronize()
 
-    print("Expected results:", local_buff)
-
     buff.enqueue_copy_from(local_buff)
 
 
@@ -255,7 +253,7 @@ fn create_buffer_from_csv[
         end = min(csv.find(",", init), csv.find("\n", init))
         if end == -1:
             break
-        buff[idx] = Float32(csv[init:end]).cast[dtype]()
+        buff[idx] = csv[init:end].__float__().cast[dtype]()
         init = end + 1
         idx += 1
     ctx.synchronize()

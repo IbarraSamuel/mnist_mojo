@@ -32,7 +32,7 @@ alias train_filepath = "digit-recognizer/train.csv"
 alias test_filepath = "digit-recognizer/test.csv"
 
 alias train_size = 42000
-alias dtype = DType.float32
+alias dtype = DType.float64
 
 
 fn main() raises:
@@ -54,9 +54,10 @@ fn main() raises:
 
     gpu = get_gpu()
 
-    alias w1_layout = Layout(10, img_pixels)
-    alias ldim = w1_layout.shape[0].value()
-    alias max_y = ldim - 1
+    alias label_size = 10
+    alias w1_layout = Layout(label_size, img_pixels)
+    alias ldim = label_size
+    alias max_y = label_size - 1
 
     print("Load train w from python to gpu.")
     # _, w1 = enqueue_create_matrix[
@@ -91,16 +92,23 @@ fn main() raises:
     alias iterations = 1
     alias alpha = Scalar[dtype](0.001)
 
-    # for i in range(iterations):
-    #     z1, a1, _, a2 = forward_propagation(gpu, x, w1, b1, w2, b2)
-    #     dw1, db1, dw2, db2 = backward_propagation(gpu, x, z1, a1, a2, w2, hot_y)
-    #     w1, b1, w2, b2 = update_parameters[alpha](
-    #         gpu, w1, b1, w2, b2, dw1, db1, dw2, db2
-    #     )
+    for i in range(iterations):
+        with xb.map_to_host() as in_host:
+            tot: Scalar[dtype] = 0
+            for v in in_host.as_span():
+                tot += v
+            print("x:", in_host)
+            print("tot:", tot)
 
-    #     if i % 10 == 0:
-    #         print("Iteration:", i)
-    #         var predictions = get_predictions(gpu, a2)
-    #         print_accuracy(gpu, predictions, y)
+        z1, a1, _, a2 = forward_propagation(gpu, x, w1, b1, w2, b2)
+        # dw1, db1, dw2, db2 = backward_propagation(gpu, x, z1, a1, a2, w2, hot_y)
+        # w1, b1, w2, b2 = update_parameters[alpha](
+        #     gpu, w1, b1, w2, b2, dw1, db1, dw2, db2
+        # )
+
+        # if i % 10 == 0:
+        #     print("Iteration:", i)
+        #     var predictions = get_predictions(gpu, a2)
+        #     print_accuracy(gpu, predictions, y)
 
     gpu.synchronize()

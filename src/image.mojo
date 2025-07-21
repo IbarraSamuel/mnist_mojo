@@ -9,7 +9,8 @@ fn print_grayscale[
     W: Writer, dtype: DType, //, charset: String = chars
 ](var intensity: Scalar[dtype], mut w: W):
     alias charset_size = len(charset)
-    pct = intensity.cast[DType.float32]() / 255.0
+    alias dt = dtype if dtype.is_floating_point() else DType.float32
+    pct = intensity.cast[dt]() / 255.0
     index = (pct * (charset_size - 1)).cast[DType.uint8]()
     w.write(charset[index])
 
@@ -18,7 +19,7 @@ alias TrainImage = TrainData[type = DType.uint8]
 
 
 struct TrainData[rows: Int, cols: Int, type: DType](
-    Writable, HasData, HasLabel, Copyable, Movable
+    Copyable, HasData, HasLabel, Movable, Writable
 ):
     alias dtype = type
     alias size = cols * rows
