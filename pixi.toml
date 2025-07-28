@@ -9,5 +9,4 @@ version = "0.1.0"
 train = "mojo src/train.mojo"
 
 [dependencies]
-max = "*"
-numpy = ">=1.26.4,<2"
+mojo = ">=25.5.0.dev2025072405,<26"
