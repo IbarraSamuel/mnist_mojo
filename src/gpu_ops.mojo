@@ -555,7 +555,7 @@ fn reduce_zero_axis[
         r, c = thread_idx.x, block_idx.x
         for i in range(iters):
             ri = r + 1024 * i
-            th_value = 0 if ri >= rows else tensor.load[1](ri, c)
+            th_value = Scalar[dtype](0) if ri >= rows else tensor.load[1](ri, c)
 
             @parameter
             if reduce_method == "max":

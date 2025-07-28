@@ -32,7 +32,7 @@ alias train_filepath = "digit-recognizer/train.csv"
 alias test_filepath = "digit-recognizer/test.csv"
 
 alias train_size = 42000
-alias dtype = DType.float64
+alias dtype = DType.float32
 
 
 fn main() raises:
@@ -93,7 +93,7 @@ fn main() raises:
     alias alpha = Scalar[dtype](0.001)
 
     for i in range(iterations):
-        z1, a1, _, a2 = forward_propagation(gpu, x, w1, b1, w2, b2)
+        z1, a1, _, _a2 = forward_propagation(gpu, x, w1, b1, w2, b2)
     #     # dw1, db1, dw2, db2 = backward_propagation(gpu, x, z1, a1, a2, w2, hot_y)
     #     # w1, b1, w2, b2 = update_parameters[alpha](
     #     #     gpu, w1, b1, w2, b2, dw1, db1, dw2, db2

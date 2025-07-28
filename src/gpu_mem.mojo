@@ -3,10 +3,11 @@ from layout import Layout as LY, LayoutTensor, IntTuple
 from layout.math import sum
 from data_traits import HasData, HasLabel
 
-from builtin.builtin_slice import slice
-from os import abort
-from algorithm import sync_parallelize
 from memory import UnsafePointer, memcpy
+from builtin.builtin_slice import slice
+from algorithm import sync_parallelize
+from os import abort
+
 from pathlib import Path
 
 import random
@@ -183,6 +184,12 @@ fn enqueue_images_to_gpu_matrix[
             local_tensor[pixel, image] = control
     ctx.synchronize()
 
+    alias tp = DType.float32
+    tot = Scalar[tp](0)
+    for i in range(len(local_buff)):
+        tot += local_buff[i]._refine[size=1]().cast[tp]()
+    print("total: ", tot)
+
     buff.enqueue_copy_from(local_buff)
 
 
@@ -244,7 +251,7 @@ fn enqueue_create_matrix_from_csv[
 fn create_buffer_from_csv[
     dtype: DType
 ](ctx: DeviceContext, csv: String) raises -> HostBuffer[dtype]:
-    commas = csv.count(",") + +csv.count("\n") + 1
+    commas = csv.count(",") + csv.count("\n") + 1
     buff = ctx.enqueue_create_host_buffer[dtype](commas)
     init = 0
     idx = 0
