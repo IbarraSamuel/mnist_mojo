@@ -1,8 +1,8 @@
 [project]
 authors = ["Samuel Ibarra <Samuel.E.Ibarra@dell.com>"]
-channels = ["https://conda.modular.com/max-nightly", "https://conda.modular.com/max", "https://repo.prefix.dev/modular-community", "https://repo.prefix.dev/conda-forge"]
+channels = ["https://repo.prefix.dev/max-nightly", "https://repo.prefix.dev/conda-forge"]
 name = "mnist_mojo"
-platforms = ["linux-64"] #, "osx-arm64"]  # Exclude because I have no NVIDIA card in my mac :)
+platforms = ["linux-64"] #, "osx-arm64"]  # Exclude because Mac GPU is not supported
 version = "0.1.0"
 
 [tasks]
