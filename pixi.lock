@@ -9,7 +9,7 @@ environments:
       - conda: https://repo.prefix.dev/conda-forge/linux-64/_libgcc_mutex-0.1-conda_forge.tar.bz2
       - conda: https://repo.prefix.dev/conda-forge/linux-64/_openmp_mutex-4.5-2_gnu.tar.bz2
       - conda: https://repo.prefix.dev/conda-forge/linux-64/bzip2-1.0.8-h4bc722e_7.conda
-      - conda: https://repo.prefix.dev/conda-forge/noarch/ca-certificates-2025.7.14-hbd8a1cb_0.conda
+      - conda: https://repo.prefix.dev/conda-forge/noarch/ca-certificates-2025.8.3-hbd8a1cb_0.conda
       - conda: https://repo.prefix.dev/conda-forge/noarch/click-8.2.1-pyh707e725_0.conda
       - conda: https://repo.prefix.dev/conda-forge/noarch/importlib-metadata-8.7.0-pyhe01879c_1.conda
       - conda: https://repo.prefix.dev/conda-forge/noarch/jupyter_client-8.6.3-pyhd8ed1ab_1.conda
@@ -31,19 +31,19 @@ environments:
       - conda: https://repo.prefix.dev/conda-forge/linux-64/libstdcxx-ng-15.1.0-h4852527_4.conda
       - conda: https://repo.prefix.dev/conda-forge/linux-64/libuuid-2.38.1-h0b41bf4_0.conda
       - conda: https://repo.prefix.dev/conda-forge/linux-64/libzlib-1.3.1-hb9d3cd8_2.conda
-      - conda: https://repo.prefix.dev/max-nightly/noarch/mblack-25.6.0.dev2025073007-release.conda
-      - conda: https://repo.prefix.dev/max-nightly/linux-64/mojo-25.6.0.dev2025073007-release.conda
-      - conda: https://repo.prefix.dev/max-nightly/linux-64/mojo-compiler-25.6.0.dev2025073007-release.conda
+      - conda: https://repo.prefix.dev/max-nightly/noarch/mblack-25.6.0.dev2025080505-release.conda
+      - conda: https://repo.prefix.dev/max-nightly/linux-64/mojo-25.6.0.dev2025080505-release.conda
+      - conda: https://repo.prefix.dev/max-nightly/linux-64/mojo-compiler-25.6.0.dev2025080505-release.conda
       - conda: https://repo.prefix.dev/conda-forge/noarch/mypy_extensions-1.1.0-pyha770c72_0.conda
       - conda: https://repo.prefix.dev/conda-forge/linux-64/ncurses-6.5-h2d0b736_3.conda
-      - conda: https://repo.prefix.dev/conda-forge/linux-64/openssl-3.5.1-h7b32b05_0.conda
+      - conda: https://repo.prefix.dev/conda-forge/linux-64/openssl-3.5.2-h26f9b46_0.conda
       - conda: https://repo.prefix.dev/conda-forge/noarch/packaging-25.0-pyh29332c3_1.conda
       - conda: https://repo.prefix.dev/conda-forge/noarch/pathspec-0.12.1-pyhd8ed1ab_1.conda
       - conda: https://repo.prefix.dev/conda-forge/noarch/platformdirs-4.3.8-pyhe01879c_0.conda
       - conda: https://repo.prefix.dev/conda-forge/linux-64/python-3.13.5-hec9711d_102_cp313.conda
       - conda: https://repo.prefix.dev/conda-forge/noarch/python-dateutil-2.9.0.post0-pyhe01879c_2.conda
       - conda: https://repo.prefix.dev/conda-forge/noarch/python_abi-3.13-8_cp313.conda
-      - conda: https://repo.prefix.dev/conda-forge/linux-64/pyzmq-27.0.0-py313h8e95178_0.conda
+      - conda: https://repo.prefix.dev/conda-forge/linux-64/pyzmq-27.0.1-py313hb9b051e_0.conda
       - conda: https://repo.prefix.dev/conda-forge/linux-64/readline-8.2-h8c095d6_2.conda
       - conda: https://repo.prefix.dev/conda-forge/noarch/six-1.17.0-pyhe01879c_1.conda
       - conda: https://repo.prefix.dev/conda-forge/linux-64/tk-8.6.13-noxft_hd72426e_102.conda
@@ -84,14 +84,14 @@ packages:
   license_family: BSD
   size: 252783
   timestamp: 1720974456583
-- conda: https://repo.prefix.dev/conda-forge/noarch/ca-certificates-2025.7.14-hbd8a1cb_0.conda
-  sha256: 29defbd83c7829788358678ec996adeee252fa4d4274b7cd386c1ed73d2b201e
-  md5: d16c90324aef024877d8713c0b7fea5b
+- conda: https://repo.prefix.dev/conda-forge/noarch/ca-certificates-2025.8.3-hbd8a1cb_0.conda
+  sha256: 837b795a2bb39b75694ba910c13c15fa4998d4bb2a622c214a6a5174b2ae53d1
+  md5: 74784ee3d225fc3dca89edb635b4e5cc
   depends:
   - __unix
   license: ISC
-  size: 155658
-  timestamp: 1752482350666
+  size: 154402
+  timestamp: 1754210968730
 - conda: https://repo.prefix.dev/conda-forge/noarch/click-8.2.1-pyh707e725_0.conda
   sha256: 8aee789c82d8fdd997840c952a586db63c6890b00e88c4fb6e80a38edd5f51c0
   md5: 94b550b8d3a614dbd326af798c7dfb40
@@ -217,6 +217,7 @@ packages:
   - libgcc-ng ==15.1.0=*_4
   - libgomp 15.1.0 h767d61c_4
   license: GPL-3.0-only WITH GCC-exception-3.1
+  license_family: GPL
   size: 824153
   timestamp: 1753903866511
 - conda: https://repo.prefix.dev/conda-forge/linux-64/libgcc-ng-15.1.0-h69a702a_4.conda
@@ -225,6 +226,7 @@ packages:
   depends:
   - libgcc 15.1.0 h767d61c_4
   license: GPL-3.0-only WITH GCC-exception-3.1
+  license_family: GPL
   size: 29249
   timestamp: 1753903872571
 - conda: https://repo.prefix.dev/conda-forge/linux-64/libgomp-15.1.0-h767d61c_4.conda
@@ -233,6 +235,7 @@ packages:
   depends:
   - __glibc >=2.17,<3.0.a0
   license: GPL-3.0-only WITH GCC-exception-3.1
+  license_family: GPL
   size: 447289
   timestamp: 1753903801049
 - conda: https://repo.prefix.dev/conda-forge/linux-64/liblzma-5.8.1-hb9d3cd8_2.conda
@@ -281,6 +284,7 @@ packages:
   - __glibc >=2.17,<3.0.a0
   - libgcc 15.1.0 h767d61c_4
   license: GPL-3.0-only WITH GCC-exception-3.1
+  license_family: GPL
   size: 3903453
   timestamp: 1753903894186
 - conda: https://repo.prefix.dev/conda-forge/linux-64/libstdcxx-ng-15.1.0-h4852527_4.conda
@@ -289,6 +293,7 @@ packages:
   depends:
   - libstdcxx 15.1.0 h8f9b012_4
   license: GPL-3.0-only WITH GCC-exception-3.1
+  license_family: GPL
   size: 29317
   timestamp: 1753903924491
 - conda: https://repo.prefix.dev/conda-forge/linux-64/libuuid-2.38.1-h0b41bf4_0.conda
@@ -312,9 +317,9 @@ packages:
   license_family: Other
   size: 60963
   timestamp: 1727963148474
-- conda: https://repo.prefix.dev/max-nightly/noarch/mblack-25.6.0.dev2025073007-release.conda
+- conda: https://repo.prefix.dev/max-nightly/noarch/mblack-25.6.0.dev2025080505-release.conda
   noarch: python
-  sha256: 13f7d4100fffb32dcc72138ee67283f77a79c50cfcd4a8549a2f25fdb1c3d37a
+  sha256: 2d5898d6f89ad3b6ccbdb42dba61436bcb3ee501d17cd65b499f067d734468f1
   depends:
   - python >=3.9
   - click >=8.0.0
@@ -326,23 +331,23 @@ packages:
   - typing_extensions >=v4.12.2
   - python
   license: MIT
-  size: 131475
-  timestamp: 1753859472317
-- conda: https://repo.prefix.dev/max-nightly/linux-64/mojo-25.6.0.dev2025073007-release.conda
-  sha256: 5495cf25982a44f68b9dab7f3824eb4eeeb262cec440f7597faad4f7ab5ab24f
+  size: 131543
+  timestamp: 1754371454726
+- conda: https://repo.prefix.dev/max-nightly/linux-64/mojo-25.6.0.dev2025080505-release.conda
+  sha256: 39f822f438abc59abea571d3f9697c93947bbeb70d7dc21dcc2c600429ad4e47
   depends:
   - python >=3.9
-  - mojo-compiler ==25.6.0.dev2025073007 release
-  - mblack ==25.6.0.dev2025073007 release
+  - mojo-compiler ==25.6.0.dev2025080505 release
+  - mblack ==25.6.0.dev2025080505 release
   - jupyter_client >=8.6.2,<8.7
   license: LicenseRef-Modular-Proprietary
-  size: 86892455
-  timestamp: 1753859472317
-- conda: https://repo.prefix.dev/max-nightly/linux-64/mojo-compiler-25.6.0.dev2025073007-release.conda
-  sha256: 9b849329ab713f37e6e379fcc53c7ec69472c358db0c77835555130620c48e51
+  size: 88990474
+  timestamp: 1754371454726
+- conda: https://repo.prefix.dev/max-nightly/linux-64/mojo-compiler-25.6.0.dev2025080505-release.conda
+  sha256: 5e30a8920792fce20bf4f2ca92a85eeda71a368110d171369a41bd165f44f861
   license: LicenseRef-Modular-Proprietary
-  size: 78329418
-  timestamp: 1753859472317
+  size: 79348509
+  timestamp: 1754371454725
 - conda: https://repo.prefix.dev/conda-forge/noarch/mypy_extensions-1.1.0-pyha770c72_0.conda
   sha256: 6ed158e4e5dd8f6a10ad9e525631e35cee8557718f83de7a4e3966b1f772c4b1
   md5: e9c622e0d00fa24a6292279af3ab6d06
@@ -361,17 +366,17 @@ packages:
   license: X11 AND BSD-3-Clause
   size: 891641
   timestamp: 1738195959188
-- conda: https://repo.prefix.dev/conda-forge/linux-64/openssl-3.5.1-h7b32b05_0.conda
-  sha256: 942347492164190559e995930adcdf84e2fea05307ec8012c02a505f5be87462
-  md5: c87df2ab1448ba69169652ab9547082d
+- conda: https://repo.prefix.dev/conda-forge/linux-64/openssl-3.5.2-h26f9b46_0.conda
+  sha256: c9f54d4e8212f313be7b02eb962d0cb13a8dae015683a403d3accd4add3e520e
+  md5: ffffb341206dd0dab0c36053c048d621
   depends:
   - __glibc >=2.17,<3.0.a0
   - ca-certificates
-  - libgcc >=13
+  - libgcc >=14
   license: Apache-2.0
   license_family: Apache
-  size: 3131002
-  timestamp: 1751390382076
+  size: 3128847
+  timestamp: 1754465526100
 - conda: https://repo.prefix.dev/conda-forge/noarch/packaging-25.0-pyh29332c3_1.conda
   sha256: 289861ed0c13a15d7bbb408796af4de72c2fe67e2bcb0de98f4c3fce259d7991
   md5: 58335b26c38bf4a20f399384c33cbcf9
@@ -448,21 +453,21 @@ packages:
   license_family: BSD
   size: 7002
   timestamp: 1752805902938
-- conda: https://repo.prefix.dev/conda-forge/linux-64/pyzmq-27.0.0-py313h8e95178_0.conda
-  sha256: 6446721c43ba540c02ced4dde564f5a9a0131e40aa406e8af6313084c4a2024f
-  md5: c912a00e5cb59357ef55b7930a48cf48
+- conda: https://repo.prefix.dev/conda-forge/linux-64/pyzmq-27.0.1-py313hb9b051e_0.conda
+  sha256: c83a9fe52d0b08498492d00dc65f0f50fec614aa49914ab1269e7b23e8439a67
+  md5: 3207e5aef7ef1d899d64bcf8aaeecb91
   depends:
   - __glibc >=2.17,<3.0.a0
-  - libgcc >=13
+  - libgcc >=14
   - libsodium >=1.0.20,<1.0.21.0a0
-  - libstdcxx >=13
+  - libstdcxx >=14
   - python >=3.13,<3.14.0a0
   - python_abi 3.13.* *_cp313
   - zeromq >=4.3.5,<4.4.0a0
   license: BSD-3-Clause
   license_family: BSD
-  size: 384549
-  timestamp: 1749898593849
+  size: 385743
+  timestamp: 1754238229027
 - conda: https://repo.prefix.dev/conda-forge/linux-64/readline-8.2-h8c095d6_2.conda
   sha256: 2d6d0c026902561ed77cd646b5021aef2d4db22e57a5b0178dfc669231e06d2c
   md5: 283b96675859b20a825f8fa30f311446
@@ -501,6 +506,7 @@ packages:
   - python >=3.9
   - python
   license: MIT
+  license_family: MIT
   size: 21238
   timestamp: 1753796677376
 - conda: https://repo.prefix.dev/conda-forge/linux-64/tornado-6.5.1-py313h536fd9c_0.conda
