@@ -186,9 +186,11 @@ fn enqueue_images_to_gpu_matrix[
 
     alias tp = DType.float32
     tot = Scalar[tp](0)
+    tot2 = Scalar[DType.float64](0)
     for i in range(len(local_buff)):
         tot += local_buff[i]._refine[size=1]().cast[tp]()
-    print("total: ", tot)
+        tot2 += local_buff[i]._refine[size=1]().cast[DType.float64]()
+    print("total: ", tot, "vs real total:", tot2)
 
     buff.enqueue_copy_from(local_buff)
 

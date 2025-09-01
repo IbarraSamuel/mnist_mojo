@@ -695,7 +695,7 @@ fn der_relu[
 
     fn is_positive(t: __type_of(t), o: __type_of(out)):
         r, c = thread_idx.x, block_idx.x
-        o[r, c] = (t[r, c] > 0).cast[dtype]()
+        o[r, c] = (t[r, c].gt(0)).cast[dtype]()
 
     ctx.enqueue_function[is_positive](t, out, grid_dim=cols, block_dim=rows)
 
@@ -822,7 +822,7 @@ fn print_accuracy[
         pred: __type_of(predictions), exp: __type_of(expected), o: __type_of(o)
     ):
         i = block_idx.x
-        eql = pred[i][0] == exp[i][0]
+        eql = pred[i][0].eq(exp[i][0])
         o[i, 0] = eql.cast[dtype]()
 
     ctx.enqueue_function[_compare](

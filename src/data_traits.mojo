@@ -5,7 +5,7 @@ trait HasData:
     alias dtype: DType
     alias size: Int
 
-    fn get_data(self) -> SIMD[dtype, next_power_of_two(Self.size)]:
+    fn get_data(self) -> SIMD[Self.dtype, next_power_of_two(Self.size)]:
         ...
 
 

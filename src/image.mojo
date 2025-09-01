@@ -48,14 +48,6 @@ struct TrainData[rows: Int, cols: Int, type: DType](
 
         self.data = final_data
 
-    fn __copyinit__(out self, other: Self):
-        self.label = other.label
-        self.data = other.data
-
-    fn __moveinit__(out self, var other: Self):
-        self.label = other.label
-        self.data = other.data
-
     fn get_data(self) -> Self.Data:
         return self.data
 
