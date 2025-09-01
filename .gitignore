@@ -14,3 +14,5 @@ python/
 
 *.csv
 .vscode/
+
+kgen.trace.*
