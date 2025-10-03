@@ -31,7 +31,7 @@ struct TrainData[rows: Int, cols: Int, type: DType](
 
     fn __init__(
         out self,
-        data: String,
+        data: StringSlice[mut=False],
         init: Int,
         end: Int,
     ) raises:
@@ -40,7 +40,7 @@ struct TrainData[rows: Int, cols: Int, type: DType](
         # string = String(buffer=List(self_data))
         init_pos = string.find(",")
         self.label = Int(string[:init_pos])
-        elems = (string^)[init_pos + 1 :].split(",")
+        elems = string[init_pos + 1 :].split(",")
         final_data = Self.Data(0)
         # nums_list = List[Float32]()
         for i in range(len(elems)):

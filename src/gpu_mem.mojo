@@ -184,13 +184,12 @@ fn enqueue_images_to_gpu_matrix[
             local_tensor[pixel, image] = control
     ctx.synchronize()
 
-    alias tp = DType.float32
-    tot = Scalar[tp](0)
-    tot2 = Scalar[DType.float64](0)
+    tot = Scalar[img_type.dtype](0)
+    correct_tot = Scalar[DType.float64](0)
     for i in range(len(local_buff)):
-        tot += local_buff[i]._refine[size=1]().cast[tp]()
-        tot2 += local_buff[i]._refine[size=1]().cast[DType.float64]()
-    print("total: ", tot, "vs real total:", tot2)
+        tot += local_buff[i]._refine[new_size=1]()
+        correct_tot += local_buff[i]._refine[new_size=1]().cast[DType.float64]()
+    print("total: ", tot, "vs correct total:", correct_tot)
 
     buff.enqueue_copy_from(local_buff)
 

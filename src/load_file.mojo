@@ -26,12 +26,12 @@ fn arange_data[
         err = msg.as_string_slice().format(len(jumps), size)
         os.abort(err)
 
-    frst = TD(data=train_data_string, init=0, end=jumps[0])
-    images = List[TD]()
+    var frst = TD(data=train_data_string, init=0, end=jumps[0])
+    images = List[TD](capacity=file_rows)
 
     # Fill with something
     for _ in range(file_rows):
-        images.append(frst)
+        images.append(frst.copy())
 
     # Then, fill it with multiple threads
     @parameter
@@ -41,11 +41,11 @@ fn arange_data[
             init=jumps[i],
             end=jumps[i + 1],
         )
-        images[i + 1] = img
+        images[i + 1] = img^
 
     sync_parallelize[calc_each](len(jumps) - 1)
 
-    return images
+    return images^
 
 
 fn read_image_file[
