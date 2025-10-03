@@ -9,4 +9,4 @@ version = "0.1.0"
 train = "mojo src/train.mojo"
 
 [dependencies]
-mojo = "<1.0.0"
+mojo = "*"
