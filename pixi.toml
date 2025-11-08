@@ -1,4 +1,4 @@
-[project]
+[workspace]
 authors = ["Samuel Ibarra <Samuel.E.Ibarra@dell.com>"]
 channels = ["https://prefix.dev/max-nightly", "https://prefix.dev/conda-forge"]
 name = "mnist_mojo"
