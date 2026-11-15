@@ -13,6 +13,7 @@ digit-recognizer/
 python/
 
 *.csv
+*.bin
 .vscode/
 
 kgen.trace.*

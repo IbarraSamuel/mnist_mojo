@@ -1,0 +1,27 @@
+[project]
+name = "python-mnist"
+version = "0.1.0"
+description = "Add your description here"
+authors = [
+    { name = "Samuel Ibarra", email = "ing.samuelibarra@gmail.com" }
+]
+requires-python = ">=3.13.2"
+dependencies = [
+    "max>=26.8.0.dev2026111316",
+    "numpy>=2.5.4",
+    "pillow>=13.0.0",
+]
+
+[project.scripts]
+train = "python_mnist.train:main"
+predict = "python_mnist.predict:main"
+
+[tool.uv]
+prerelease = "allow"
+
+[[tool.uv.index]]
+url = "https://whl.modular.com/nightly/simple/"
+
+[build-system]
+requires = ["uv_build>=0.13.8,<0.14.0"]
+build-backend = "uv_build"

@@ -1,17 +1,17 @@
-from bit import next_power_of_two
+from std.bit import next_power_of_two
 
 
 trait HasData:
-    alias dtype: DType
-    alias size: Int
+    comptime dtype: DType
+    comptime size: Int
 
-    fn get_data(self) -> SIMD[Self.dtype, next_power_of_two(Self.size)]:
+    def get_data(self) -> SIMD[Self.dtype, next_power_of_two(Self.size)]:
         ...
 
 
 trait HasLabel:
-    fn get_label(self) -> Int:
+    def get_label(self) -> Int:
         ...
 
 
-alias Loadable = HasData & HasLabel
+comptime Loadable = HasData & HasLabel
