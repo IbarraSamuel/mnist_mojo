@@ -139,9 +139,12 @@ def load_mnist_csv[
 ) raises -> MNISTDataset:
     """Loads an MNIST CSV file (train.csv or test.csv) in parallel."""
     var text = Path(path).read_text()
-    var first_nl = text.find("\n")
-    if first_nl == -1:
-        raise Error(t"CSV file {path} has no header newline")
+    var first_nl: Int
+    match text.find("\n"):
+        case .Some(idx):
+            first_nl = idx
+        case .None:
+            raise Error(t"CSV file {path} has no header newline")
 
     var body = text[byte = first_nl + 1 :]
     var starts, ends = _find_line_bounds(
@@ -210,9 +213,12 @@ def read_image_file[
     """Loads labeled MNIST rows into a List[TrainData] in parallel."""
     comptime TD = TrainData[rows, cols, dtype]
     var text_data = Path(path).read_text()
-    var first_nl = text_data.find("\n")
-    if first_nl == -1:
-        raise Error(t"CSV file {path} has no header newline")
+    var first_nl: Int
+    match text_data.find("\n"):
+        case .Some(idx):
+            first_nl = idx
+        case .None:
+            raise Error(t"CSV file {path} has no header newline")
 
     var body = text_data[byte = first_nl + 1 :]
     var starts, ends = _find_line_bounds(body)

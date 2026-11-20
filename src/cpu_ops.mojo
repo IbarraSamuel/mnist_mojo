@@ -106,31 +106,43 @@ struct CPUMatrix(Copyable):
 
     @inline(.always)
     def ptr(self) -> ImmPointer[Float32, origin_of(self.data)]:
-        return self.data.unsafe_ptr()
+        return self.data.unsafe_ptr().unsafe_origin_cast[origin_of(self.data)]()
 
     @inline(.always)
     def mut_ptr(mut self) -> MutPointer[Float32, origin_of(self.data)]:
-        return self.data.unsafe_ptr()
+        return self.data.unsafe_ptr().unsafe_origin_cast[origin_of(self.data)]()
 
     @inline(.always)
     def view(self) -> MatrixView[origin_of(self.data)]:
-        return MatrixView(self.data.unsafe_ptr(), self.rows, self.cols)
+        return MatrixView(
+            self.data.unsafe_ptr().unsafe_origin_cast[origin_of(self.data)](),
+            self.rows,
+            self.cols,
+        )
 
     @inline(.always)
     def mut_view(mut self) -> MatrixView[origin_of(self.data)]:
-        return MatrixView(self.data.unsafe_ptr(), self.rows, self.cols)
+        return MatrixView(
+            self.data.unsafe_ptr().unsafe_origin_cast[origin_of(self.data)](),
+            self.rows,
+            self.cols,
+        )
 
     @inline(.always)
     def static_view[
         r: Int, c: Int
     ](self) -> StaticMatrixView[r, c, origin_of(self.data)]:
-        return StaticMatrixView[r, c](self.data.unsafe_ptr())
+        return StaticMatrixView[r, c](
+            self.data.unsafe_ptr().unsafe_origin_cast[origin_of(self.data)]()
+        )
 
     @inline(.always)
     def static_mut_view[
         r: Int, c: Int
     ](mut self) -> StaticMatrixView[r, c, origin_of(self.data)]:
-        return StaticMatrixView[r, c](self.data.unsafe_ptr())
+        return StaticMatrixView[r, c](
+            self.data.unsafe_ptr().unsafe_origin_cast[origin_of(self.data)]()
+        )
 
 
 @inline(.always)
@@ -1890,23 +1902,14 @@ def cpu_matmul_tn_relu_mask_static[
     )
 
 
-def cpu_add_bias_and_relu(
-    mut z: CPUMatrix, bias: CPUMatrix, mut a: CPUMatrix
-) raises:
-    """Computes Z[r, c] += bias[r] and A[r, c] = max(Z[r, c], 0)."""
-    if (
-        z.rows != bias.rows
-        or bias.cols != 1
-        or a.rows != z.rows
-        or a.cols != z.cols
-    ):
-        raise Error("cpu_add_bias_and_relu: shape mismatch")
-    var rows = z.rows
-    var cols = z.cols
-    var zp = z.data.unsafe_ptr()
-    var bp = bias.data.unsafe_ptr()
-    var ap = a.data.unsafe_ptr()
-
+@inline(.always)
+def _add_bias_and_relu_impl(
+    zp: MutPointer[Float32, _],
+    bp: ImmPointer[Float32, _],
+    ap: MutPointer[Float32, _],
+    rows: Int,
+    cols: Int,
+):
     @inline(.always)
     def row_worker(r: Int) {imm zp, imm bp, imm ap, imm cols}:
         var bv = bp[unsafe_offset=r]
@@ -1928,15 +1931,33 @@ def cpu_add_bias_and_relu(
             row_worker(r)
 
 
-def cpu_add_bias(mut z: CPUMatrix, bias: CPUMatrix) raises:
-    """Computes Z[r, c] += bias[r] in-place."""
-    if z.rows != bias.rows or bias.cols != 1:
-        raise Error("cpu_add_bias: shape mismatch")
-    var rows = z.rows
-    var cols = z.cols
-    var zp = z.data.unsafe_ptr()
-    var bp = bias.data.unsafe_ptr()
+def cpu_add_bias_and_relu(
+    mut z: CPUMatrix, bias: CPUMatrix, mut a: CPUMatrix
+) raises:
+    """Computes Z[r, c] += bias[r] and A[r, c] = max(Z[r, c], 0)."""
+    if (
+        z.rows != bias.rows
+        or bias.cols != 1
+        or a.rows != z.rows
+        or a.cols != z.cols
+    ):
+        raise Error("cpu_add_bias_and_relu: shape mismatch")
+    _add_bias_and_relu_impl(
+        z.data.unsafe_ptr(),
+        bias.data.unsafe_ptr(),
+        a.data.unsafe_ptr(),
+        z.rows,
+        z.cols,
+    )
 
+
+@inline(.always)
+def _add_bias_impl(
+    zp: MutPointer[Float32, _],
+    bp: ImmPointer[Float32, _],
+    rows: Int,
+    cols: Int,
+):
     @inline(.always)
     def row_worker(r: Int) {imm zp, imm bp, imm cols}:
         var bv = bp[unsafe_offset=r]
@@ -1954,6 +1975,18 @@ def cpu_add_bias(mut z: CPUMatrix, bias: CPUMatrix) raises:
     else:
         for r in range(rows):
             row_worker(r)
+
+
+def cpu_add_bias(mut z: CPUMatrix, bias: CPUMatrix) raises:
+    """Computes Z[r, c] += bias[r] in-place."""
+    if z.rows != bias.rows or bias.cols != 1:
+        raise Error("cpu_add_bias: shape mismatch")
+    _add_bias_impl(
+        z.data.unsafe_ptr(),
+        bias.data.unsafe_ptr(),
+        z.rows,
+        z.cols,
+    )
 
 
 @inline(.always)
