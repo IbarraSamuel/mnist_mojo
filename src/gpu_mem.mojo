@@ -2,7 +2,7 @@ from std.math import sqrt
 from std.memory import unsafe_memcpy
 from std.random import randn
 from max.gpu.host import DeviceBuffer, DeviceContext
-from layout import TileTensor, row_major
+from layout import row_major
 
 
 struct DeviceMatrix[dtype: DType, rows: Int, cols: Int](Movable):

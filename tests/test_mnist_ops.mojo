@@ -1,11 +1,9 @@
 from std.math import abs
 from std.os import remove
 from std.testing import assert_equal, assert_true, TestSuite
-from std.pathlib import Path
 
 from cpu_ops import (
     CPUMatrix,
-    cpu_add_bias,
     cpu_add_bias_and_relu,
     cpu_argmax_axis0,
     cpu_matmul_nn,
@@ -17,7 +15,7 @@ from cpu_ops import (
     cpu_sum_axis1_scaled,
 )
 from load_file import _find_line_bounds, _parse_mnist_row
-from image_io import GrayImage, load_pgm_grayscale, preprocess_for_mnist
+from image_io import load_pgm_grayscale, preprocess_for_mnist
 from predict import predict_single
 from weights import load_weights, save_weights
 

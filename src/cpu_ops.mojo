@@ -38,7 +38,7 @@ struct MatrixView[mut: Bool, //, origin: Origin[mut=mut]](
     @inline(.always)
     def row_ptr(
         self, r: Int
-    ) -> Pointer[Float32, mut=Self.mut, origin=Self.origin]:
+    ) -> Pointer[mut=Self.mut, Float32, origin=Self.origin]:
         return self.ptr.unsafe_offset(r * self.cols)
 
     @inline(.always)
@@ -49,11 +49,11 @@ struct MatrixView[mut: Bool, //, origin: Origin[mut=mut]](
     def store[
         w: Int = 1
     ](
-        self: MatrixView[mut=True, origin=Self.origin],
+        self: MatrixView[origin=Self.origin],
         r: Int,
         c: Int,
         val: SIMD[DType.float32, w],
-    ):
+    ) where Self.mut:
         self.ptr.unsafe_store[width=w](r * self.cols + c, val)
 
 
@@ -70,7 +70,7 @@ struct StaticMatrixView[
     @inline(.always)
     def row_ptr(
         self, r: Int
-    ) -> Pointer[Float32, mut=Self.mut, origin=Self.origin]:
+    ) -> Pointer[mut=Self.mut, Float32, origin=Self.origin]:
         return self.ptr.unsafe_offset(r * Self.cols)
 
 
